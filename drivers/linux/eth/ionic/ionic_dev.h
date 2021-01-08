@@ -11,10 +11,8 @@
 #include "ionic_api.h"
 #include "ionic_regs.h"
 
-#define IONIC_MIN_MTU			ETH_MIN_MTU
-#define IONIC_MAX_MTU			9194
 #define IONIC_MAX_TX_DESC		8192
-#define IONIC_MAX_RX_DESC		16384
+#define IONIC_MAX_RX_DESC		8192
 #define IONIC_MIN_TXRX_DESC		16
 #define IONIC_DEF_TXRX_DESC		4096
 #define IONIC_LIFS_MAX			1024
@@ -86,6 +84,8 @@ static_assert(sizeof(struct ionic_q_init_cmd) == 64);
 static_assert(sizeof(struct ionic_q_init_comp) == 16);
 static_assert(sizeof(struct ionic_q_control_cmd) == 64);
 static_assert(sizeof(ionic_q_control_comp) == 16);
+static_assert(sizeof(struct ionic_q_identify_cmd) == 64);
+static_assert(sizeof(struct ionic_q_identify_comp) == 16);
 
 static_assert(sizeof(struct ionic_rx_mode_set_cmd) == 64);
 static_assert(sizeof(ionic_rx_mode_set_comp) == 16);
@@ -331,6 +331,11 @@ void ionic_dev_cmd_go(struct ionic_dev *idev, union ionic_dev_cmd *cmd);
 u8 ionic_dev_cmd_status(struct ionic_dev *idev);
 bool ionic_dev_cmd_done(struct ionic_dev *idev);
 void ionic_dev_cmd_comp(struct ionic_dev *idev, union ionic_dev_cmd_comp *comp);
+
+#define IONIC_FW_INSTALL_TIMEOUT			(25 * 60)
+#define IONIC_FW_ACTIVATE_TIMEOUT			(30)
+
+int ionic_firmware_update(struct ionic_lif *lif, const void *const fw_data, u32 fw_sz);
 
 void ionic_dev_cmd_identify(struct ionic_dev *idev, u8 ver);
 void ionic_dev_cmd_init(struct ionic_dev *idev);

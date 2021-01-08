@@ -704,6 +704,7 @@ static int ionic_eq_alloc(struct ionic *ionic, int index)
 err_out_free_intr:
 	ionic_intr_free(ionic, eq->intr.index);
 err_out:
+	kfree(eq);
 	return err;
 }
 

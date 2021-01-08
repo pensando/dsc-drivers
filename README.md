@@ -44,3 +44,16 @@ The Makefile in drivers/linux will build all three drivers when
 ARCH=aarch64, else will build the host version of ionic.  Simply cd to
 the drivers/linux directory and type 'make'.
 
+## History
+
+2020-07-07 - initial drivers using 1.8.0-E-48
+
+2021-01-08 - driver updates to 1.15.3-C-14
+ - FW update fixes
+ - Makefile cleanups
+ - Add support for choosing individual Tx and Rx interrupts rather than paired
+ - Fix memory leaks and timing issues
+ - Kcompat fixes for newer upstream and Red Hat kernels
+ - Add interrupt affinity option for mnic_ionic use
+ - Other optimizations and stability fixes
+

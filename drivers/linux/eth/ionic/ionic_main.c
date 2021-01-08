@@ -4,6 +4,7 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/netdevice.h>
+#include <linux/dynamic_debug.h>
 #include <linux/utsname.h>
 
 #include "ionic.h"
@@ -17,7 +18,7 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION(IONIC_DRV_VERSION);
 MODULE_INFO(supported, "external");
 
-unsigned int max_slaves = 0;
+unsigned int max_slaves;
 module_param(max_slaves, uint, 0400);
 MODULE_PARM_DESC(max_slaves, "Maximum number of slave lifs");
 
@@ -32,6 +33,10 @@ MODULE_PARM_DESC(tx_budget, "Number of tx completions to process per NAPI poll")
 unsigned int devcmd_timeout = DEVCMD_TIMEOUT;
 module_param(devcmd_timeout, uint, 0600);
 MODULE_PARM_DESC(devcmd_timeout, "Devcmd timeout in seconds (default 30 secs)");
+
+unsigned long affinity_mask_override;
+module_param(affinity_mask_override, ulong, 0600);
+MODULE_PARM_DESC(affinity_mask_override, "IRQ affinity mask to override (max 64 bits)");
 
 static const char *ionic_error_to_str(enum ionic_status_code code)
 {
@@ -187,6 +192,10 @@ static const char *ionic_opcode_to_str(enum ionic_cmd_opcode opcode)
 		return "IONIC_CMD_FW_DOWNLOAD";
 	case IONIC_CMD_FW_CONTROL:
 		return "IONIC_CMD_FW_CONTROL";
+	case IONIC_CMD_FW_DOWNLOAD_V1:
+		return "IONIC_CMD_FW_DOWNLOAD_V1";
+	case IONIC_CMD_FW_CONTROL_V1:
+		return "IONIC_CMD_FW_CONTROL_V1";
 	case IONIC_CMD_VF_GETATTR:
 		return "IONIC_CMD_VF_GETATTR";
 	case IONIC_CMD_VF_SETATTR:
@@ -374,17 +383,22 @@ int ionic_dev_cmd_wait(struct ionic *ionic, unsigned long max_seconds)
 	 */
 	max_wait = jiffies + (max_seconds * HZ);
 try_again:
+	opcode = idev->dev_cmd_regs->cmd.cmd.opcode;
 	start_time = jiffies;
 	do {
 		done = ionic_dev_cmd_done(idev);
 		if (done)
 			break;
-		msleep(5);
-		hb = ionic_heartbeat_check(ionic);
+		usleep_range(100, 200);
+
+		/* Don't check the heartbeat on FW_CONTROL commands as they are
+		 * notorious for interrupting the firmware's heartbeat update.
+		 */
+		if (opcode != IONIC_CMD_FW_CONTROL)
+			hb = ionic_heartbeat_check(ionic);
 	} while (!done && !hb && time_before(jiffies, max_wait));
 	duration = jiffies - start_time;
 
-	opcode = idev->dev_cmd_regs->cmd.cmd.opcode;
 	dev_dbg(ionic->dev, "DEVCMD %s (%d) done=%d took %ld secs (%ld jiffies)\n",
 		ionic_opcode_to_str(opcode), opcode,
 		done, duration / HZ, duration);
@@ -405,7 +419,7 @@ try_again:
 	err = ionic_dev_cmd_status(&ionic->idev);
 	if (err) {
 		if (err == IONIC_RC_EAGAIN && !time_after(jiffies, max_wait)) {
-			dev_err(ionic->dev, "DEV_CMD %s (%d) error, %s (%d) retrying...\n",
+			dev_dbg(ionic->dev, "DEV_CMD %s (%d), %s (%d) retrying...\n",
 				ionic_opcode_to_str(opcode), opcode,
 				ionic_error_to_str(err), err);
 
@@ -571,7 +585,7 @@ int ionic_port_init(struct ionic *ionic)
 						     &idev->port_info_pa,
 						     GFP_KERNEL);
 		if (!idev->port_info) {
-			dev_err(ionic->dev, "Failed to allocate port info, aborting\n");
+			dev_err(ionic->dev, "Failed to allocate port info\n");
 			return -ENOMEM;
 		}
 	}
@@ -626,9 +640,26 @@ int ionic_port_reset(struct ionic *ionic)
 
 static int __init ionic_init_module(void)
 {
+	unsigned long max_affinity = GENMASK_ULL((min(num_present_cpus(),
+					(unsigned int)(sizeof(unsigned long)*BITS_PER_BYTE))-1), 0);
+
 	pr_info("%s %s, ver %s\n",
 		IONIC_DRV_NAME, IONIC_DRV_DESCRIPTION, IONIC_DRV_VERSION);
+
 	ionic_debugfs_create();
+
+	if (affinity_mask_override) {
+		/* limit affinity mask override to the available CPUs */
+		if (affinity_mask_override > max_affinity) {
+			affinity_mask_override = (affinity_mask_override & max_affinity);
+			pr_info("limiting affinity mask to: 0x%lx\n",
+					affinity_mask_override);
+		} else {
+			pr_info("affinity_mask_override: %lx\n",
+					affinity_mask_override);
+		}
+	}
+
 	return ionic_bus_register_driver();
 }
 

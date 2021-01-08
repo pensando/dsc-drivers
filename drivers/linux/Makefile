@@ -52,6 +52,7 @@ KSRC ?= /lib/modules/$(shell uname -r)/build
 ETH_KOPT += CONFIG_IONIC=m
 ETH_KOPT += CONFIG_IONIC_MNIC=_
 ETH_KOPT += CONFIG_MNET=_
+ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
 
 KCFLAGS = -Werror
 
@@ -89,6 +90,15 @@ KCFLAGS += -Wno-undef
 endif
 endif
 endif
+
+DVER = $(shell echo $$SW_VERSION)
+ifeq ($(DVER),)
+  DVER = $(shell git describe --tags 2>/dev/null)
+  ifeq ($(DVER),)
+    DVER = "0.0.0"
+  endif
+endif
+KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
 KOPT += KCFLAGS="$(KCFLAGS)"
 
