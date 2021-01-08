@@ -271,12 +271,6 @@ static void ionic_rx_clean(struct ionic_queue *q,
 		return;
 	}
 
-	if (unlikely(test_bit(IONIC_LIF_F_QUEUE_RESET, q->lif->state))) {
-		/* no packet processing while resetting */
-		stats->dropped++;
-		return;
-	}
-
 	if (le16_to_cpu(comp->len) > netdev->mtu + ETH_HLEN) {
 		stats->dropped++;
 		net_warn_ratelimited("%s: RX PKT TOO LARGE! comp->len %d\n",
@@ -752,10 +746,8 @@ static bool ionic_tx_service(struct ionic_cq *cq, struct ionic_cq_info *cq_info)
 	struct ionic_txq_comp *comp = cq_info->cq_desc;
 	struct ionic_queue *q = cq->bound_q;
 	struct ionic_desc_info *desc_info;
-#ifdef IONIC_SUPPORTS_BQL
 	int bytes = 0;
 	int pkts = 0;
-#endif
 
 	if (!color_match(comp->color, cq->done_color))
 		return false;
@@ -768,12 +760,10 @@ static bool ionic_tx_service(struct ionic_cq *cq, struct ionic_cq_info *cq_info)
 		desc_info->bytes = 0;
 		q->tail_idx = (q->tail_idx + 1) & (q->num_descs - 1);
 		ionic_tx_clean(q, desc_info, cq_info, desc_info->cb_arg);
-#ifdef IONIC_SUPPORTS_BQL
 		if (desc_info->cb_arg) {
 			pkts++;
 			bytes += desc_info->bytes;
 		}
-#endif
 		desc_info->cb = NULL;
 		desc_info->cb_arg = NULL;
 	} while (desc_info->index != le16_to_cpu(comp->comp_index));
@@ -802,10 +792,8 @@ void ionic_tx_flush(struct ionic_cq *cq)
 void ionic_tx_empty(struct ionic_queue *q)
 {
 	struct ionic_desc_info *desc_info;
-#ifdef IONIC_SUPPORTS_BQL
 	int bytes = 0;
 	int pkts = 0;
-#endif
 	int done = 0;
 
 	/* walk the not completed tx entries, if any */
@@ -814,12 +802,10 @@ void ionic_tx_empty(struct ionic_queue *q)
 		desc_info->bytes = 0;
 		q->tail_idx = (q->tail_idx + 1) & (q->num_descs - 1);
 		ionic_tx_clean(q, desc_info, NULL, desc_info->cb_arg);
-#ifdef IONIC_SUPPORTS_BQL
 		if (desc_info->cb_arg) {
 			pkts++;
 			bytes += desc_info->bytes;
 		}
-#endif
 		desc_info->cb = NULL;
 		desc_info->cb_arg = NULL;
 		done++;
@@ -908,10 +894,8 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 #ifdef IONIC_SUPPORTS_BQL
 		netdev_tx_sent_queue(q_to_ndq(q), skb->len);
 #endif
-#ifdef HAVE_NETDEV_XMIT_MORE
+#ifdef HAVE_SKB_XMIT_MORE
 		ionic_txq_post(q, !netdev_xmit_more(), ionic_tx_clean, skb);
-#elif defined HAVE_SKB_XMIT_MORE
-		ionic_txq_post(q, !skb->xmit_more, ionic_tx_clean, skb);
 #else
 		ionic_txq_post(q, true, ionic_tx_clean, skb);
 #endif
@@ -1245,10 +1229,8 @@ static int ionic_tx(struct ionic_queue *q, struct sk_buff *skb)
 #ifdef IONIC_SUPPORTS_BQL
 	netdev_tx_sent_queue(q_to_ndq(q), skb->len);
 #endif
-#ifdef HAVE_NETDEV_XMIT_MORE
+#ifdef HAVE_SKB_XMIT_MORE
 	ionic_txq_post(q, !netdev_xmit_more(), ionic_tx_clean, skb);
-#elif defined HAVE_SKB_XMIT_MORE
-	ionic_txq_post(q, !skb->xmit_more, ionic_tx_clean, skb);
 #else
 	ionic_txq_post(q, true, ionic_tx_clean, skb);
 #endif

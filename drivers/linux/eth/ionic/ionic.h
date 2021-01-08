@@ -16,7 +16,7 @@ struct ionic_lif;
 
 #define IONIC_DRV_NAME		"ionic"
 #define IONIC_DRV_DESCRIPTION	"Pensando Ethernet NIC Driver"
-#define IONIC_DRV_VERSION	"1.8.0"
+#define IONIC_DRV_VERSION	drv_ver
 
 #define PCI_VENDOR_ID_PENSANDO			0x1dd8
 
@@ -32,6 +32,7 @@ extern unsigned int max_slaves;
 extern unsigned int rx_copybreak;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
+extern unsigned long affinity_mask_override;
 
 struct ionic_vf {
 	u16	 index;

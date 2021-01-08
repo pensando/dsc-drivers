@@ -91,13 +91,6 @@ int ionic_devlink_register(struct ionic *ionic)
 		return err;
 	}
 
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0) )
-	devlink_port_attrs_set(&ionic->dl_port, DEVLINK_PORT_FLAVOUR_PHYSICAL,
-			       0, false, 0);
-#else
-	devlink_port_attrs_set(&ionic->dl_port, DEVLINK_PORT_FLAVOUR_PHYSICAL,
-			       0, false, 0, NULL, 0);
-#endif
 	err = devlink_port_register(dl, &ionic->dl_port, 0);
 	if (err)
 		dev_err(ionic->dev, "devlink_port_register failed: %d\n", err);

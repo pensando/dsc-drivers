@@ -159,12 +159,14 @@ static const struct ionic_stat_desc ionic_tx_stats_desc[] = {
 	IONIC_TX_STAT_DESC(clean),
 	IONIC_TX_STAT_DESC(dma_map_err),
 	IONIC_TX_STAT_DESC(linearize),
-	IONIC_TX_STAT_DESC(frags),
 	IONIC_TX_STAT_DESC(tso),
 	IONIC_TX_STAT_DESC(tso_bytes),
-	IONIC_TX_STAT_DESC(csum_none),
-	IONIC_TX_STAT_DESC(csum),
+#ifdef IONIC_DEBUG_STATS
 	IONIC_TX_STAT_DESC(vlan_inserted),
+	IONIC_TX_STAT_DESC(frags),
+	IONIC_TX_STAT_DESC(csum),
+	IONIC_TX_STAT_DESC(csum_none),
+#endif
 };
 
 static const struct ionic_stat_desc ionic_rx_stats_desc[] = {
@@ -172,11 +174,13 @@ static const struct ionic_stat_desc ionic_rx_stats_desc[] = {
 	IONIC_RX_STAT_DESC(bytes),
 	IONIC_RX_STAT_DESC(dma_map_err),
 	IONIC_RX_STAT_DESC(alloc_err),
+#ifdef IONIC_DEBUG_STATS
+	IONIC_RX_STAT_DESC(vlan_stripped),
 	IONIC_RX_STAT_DESC(csum_none),
 	IONIC_RX_STAT_DESC(csum_complete),
+#endif
 	IONIC_RX_STAT_DESC(csum_error),
 	IONIC_RX_STAT_DESC(dropped),
-	IONIC_RX_STAT_DESC(vlan_stripped),
 };
 
 static const struct ionic_stat_desc ionic_txq_stats_desc[] = {
