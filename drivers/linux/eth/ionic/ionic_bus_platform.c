@@ -18,7 +18,8 @@
 #define IONIC_INTR_CTRL_BAR   1
 #define IONIC_MSIX_CFG_BAR    2
 #define IONIC_DOORBELL_BAR    3
-#define IONIC_NUM_OF_BAR      4
+#define IONIC_TSTAMP_BAR      4
+#define IONIC_NUM_OF_BAR      5
 
 #define IONIC_INTR_MSIXCFG_STRIDE     0x10
 
@@ -46,6 +47,74 @@ static void ionic_intr_msixcfg(struct device *mnic_dev,
 	writel(msgdata, (pa + offsetof(struct ionic_intr_msixcfg, msgdata)));
 	writel(vctrl, (pa + offsetof(struct ionic_intr_msixcfg, vector_ctrl)));
 }
+
+/* Resources can only be mapped once at a time.  A second mapping will fail.
+ * For resources that are shared by multiple devices, we avoid using devm,
+ * because the mapping will not be used exclusively by one device, and if
+ * devices are unregistered in any order, the mapping must not be destroyed
+ * when the first device is unregistered, when other devices may still be using
+ * it.  ionic_shared_resource just maintains a refcount for mapping a shared
+ * resource for use by multiple ionic devices.
+*/
+struct ionic_shared_resource {
+	struct mutex lock;
+	void __iomem *base;
+	int refs;
+};
+
+#define IONIC_SHARED_RESOURCE_INITIALIZER(shres) { .lock = __MUTEX_INITIALIZER(shres.lock) }
+
+static void __iomem *ionic_ioremap_shared_resource(struct ionic_shared_resource *shres,
+						   struct resource *res)
+{
+	void __iomem *base;
+
+	mutex_lock(&shres->lock);
+
+	if (shres->refs) {
+		base = shres->base;
+		++shres->refs;
+	} else {
+		if (!request_mem_region(res->start, resource_size(res), res->name ?: KBUILD_MODNAME)) {
+			base = IOMEM_ERR_PTR(-EBUSY);
+		} else {
+			base = ioremap(res->start, resource_size(res));
+			if (!IS_ERR_OR_NULL(base)) {
+				shres->base = base;
+				++shres->refs;
+			}
+		}
+	}
+
+	mutex_unlock(&shres->lock);
+
+	return base;
+}
+
+static void ionic_iounmap_shared_resource(struct ionic_shared_resource *shres,
+					  void __iomem *vaddr,
+					  resource_size_t start,
+					  resource_size_t n)
+{
+	mutex_lock(&shres->lock);
+
+	if (WARN_ON(!shres->refs)) {
+		mutex_unlock(&shres->lock);
+		return;
+	}
+
+	--shres->refs;
+
+	if (!shres->refs) {
+		iounmap(vaddr);
+		release_mem_region(start, n);
+	}
+
+	mutex_unlock(&shres->lock);
+}
+
+static struct ionic_shared_resource tstamp_res =
+	IONIC_SHARED_RESOURCE_INITIALIZER(tstamp_res);
 
 int ionic_bus_get_irq(struct ionic *ionic, unsigned int num)
 {
@@ -103,11 +172,10 @@ struct net_device *ionic_alloc_netdev(struct ionic *ionic)
 {
 	struct net_device *netdev = NULL;
 	struct ionic_lif *lif;
-	int nqueues;
 
-	nqueues = ionic->ntxqs_per_lif + (ionic->nlifs - 1);
 	netdev = alloc_netdev_mqs(sizeof(struct ionic_lif), ionic->pfdev->name,
-				  NET_NAME_USER, ether_setup, nqueues, nqueues);
+				  NET_NAME_USER, ether_setup,
+				  ionic->ntxqs_per_lif, ionic->ntxqs_per_lif);
 	if (!netdev)
 		return netdev;
 
@@ -135,6 +203,7 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 					offsetof(union ionic_dev_regs, devcmd);
 	idev->intr_ctrl = ionic->bars[IONIC_INTR_CTRL_BAR].vaddr;
 	idev->msix_cfg_base = ionic->bars[IONIC_MSIX_CFG_BAR].vaddr;
+	idev->hwstamp_regs = ionic->bars[IONIC_TSTAMP_BAR].vaddr;
 
 	/* save the idev into dev->platform_data so we can use it later */
 	ionic->dev->platform_data = idev;
@@ -167,7 +236,10 @@ static int ionic_map_bars(struct ionic *ionic)
 		res = platform_get_resource(pfdev, IORESOURCE_MEM, i);
 		if (!res)
 			continue;
-		base = devm_ioremap_resource(dev, res);
+		if (i == IONIC_TSTAMP_BAR)
+			base = ionic_ioremap_shared_resource(&tstamp_res, res);
+		else
+			base = devm_ioremap_resource(dev, res);
 		if (IS_ERR(base)) {
 			dev_err(dev, "Cannot memory-map BAR %d, aborting\n", j);
 			return -ENODEV;
@@ -194,8 +266,12 @@ static void ionic_unmap_bars(struct ionic *ionic)
 		if (bars[i].vaddr) {
 			dev_info(dev, "Unmapping BAR %d @%p, bus_addr: %llx\n",
 				 i, bars[i].vaddr, bars[i].bus_addr);
-			devm_iounmap(dev, bars[i].vaddr);
-			devm_release_mem_region(dev, bars[i].bus_addr, bars[i].len);
+			if (i == IONIC_TSTAMP_BAR) {
+				ionic_iounmap_shared_resource(&tstamp_res, bars[i].vaddr, bars[i].bus_addr, bars[i].len);
+			} else {
+				devm_iounmap(dev, bars[i].vaddr);
+				devm_release_mem_region(dev, bars[i].bus_addr, bars[i].len);
+			}
 		}
 }
 
@@ -253,6 +329,7 @@ static int ionic_probe(struct platform_device *pfdev)
 		dev_err(dev, "Cannot identify device, aborting\n");
 		goto err_out_unmap_bars;
 	}
+	ionic_debugfs_add_ident(ionic);
 
 	err = ionic_init(ionic);
 	if (err) {
@@ -277,46 +354,40 @@ static int ionic_probe(struct platform_device *pfdev)
 		goto err_out_unmap_bars;
 	}
 
-	/* Allocate and init LIFs, creating a netdev per LIF */
-	err = ionic_lif_identify(ionic, IONIC_LIF_TYPE_CLASSIC,
-				 &ionic->ident.lif);
+	/* Allocate and init the LIF */
+	err = ionic_lif_size(ionic);
 	if (err) {
-		dev_err(dev, "Cannot identify LIFs: %d, aborting\n", err);
+		dev_err(dev, "Cannot size LIF: %d, aborting\n", err);
 		goto err_out_unmap_bars;
 	}
 
-	err = ionic_lifs_size(ionic);
+	err = ionic_lif_alloc(ionic);
 	if (err) {
-		dev_err(dev, "Cannot size LIFs, aborting\n");
-		goto err_out_unmap_bars;
-	}
-
-	err = ionic_lifs_alloc(ionic);
-	if (err) {
-		dev_err(dev, "Cannot allocate LIFs, aborting\n");
+		dev_err(dev, "Cannot allocate LIF: %d, aborting\n", err);
 		goto err_out_free_lifs;
 	}
 
-	err = ionic_lifs_init(ionic);
+	err = ionic_lif_init(ionic->lif);
 	if (err) {
-		dev_err(dev, "Cannot init LIFs, aborting\n");
+		dev_err(dev, "Cannot init LIF: %d, aborting\n", err);
 		goto err_out_deinit_lifs;
 	}
 
-	err = ionic_lifs_register(ionic);
+	err = ionic_lif_register(ionic->lif);
 	if (err) {
-		dev_err(dev, "Cannot register LIFs, aborting\n");
+		dev_err(dev, "Cannot register LIF: %d, aborting\n", err);
 		goto err_out_unregister_lifs;
 	}
 
 	return 0;
 
 err_out_unregister_lifs:
-	ionic_lifs_unregister(ionic);
+	ionic_lif_unregister(ionic->lif);
 err_out_deinit_lifs:
-	ionic_lifs_deinit(ionic);
+	ionic_lif_deinit(ionic->lif);
 err_out_free_lifs:
-	ionic_lifs_free(ionic);
+	ionic_lif_free(ionic->lif);
+	ionic->lif = NULL;
 	ionic_bus_free_irq_vectors(ionic);
 err_out_unmap_bars:
 	ionic_unmap_bars(ionic);
@@ -333,9 +404,10 @@ static int ionic_remove(struct platform_device *pfdev)
 	struct ionic *ionic = platform_get_drvdata(pfdev);
 
 	if (ionic) {
-		ionic_lifs_unregister(ionic);
-		ionic_lifs_deinit(ionic);
-		ionic_lifs_free(ionic);
+		ionic_lif_unregister(ionic->lif);
+		ionic_lif_deinit(ionic->lif);
+		ionic_lif_free(ionic->lif);
+		ionic->lif = NULL;
 		ionic_port_reset(ionic);
 		ionic_reset(ionic);
 		ionic_bus_free_irq_vectors(ionic);

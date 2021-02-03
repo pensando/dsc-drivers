@@ -1,30 +1,40 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2017 - 2020 Pensando Systems, Inc */
+/* Copyright(c) 2020 Pensando Systems, Inc */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
+#include <linux/firmware.h>
 
 #include "ionic.h"
 #include "ionic_dev.h"
 #include "ionic_lif.h"
 
-static void
-ionic_dev_cmd_firmware_download(struct ionic_dev *idev, uint64_t addr,
-				uint32_t offset, uint32_t length)
+/* The worst case wait for the install activity is about 25 minutes when
+ * installing a new CPLD, which is very seldom.  Normal is about 30-35
+ * seconds.  Since the driver can't tell if a CPLD update will happen we
+ * set the timeout for the ugly case.
+ */
+#define IONIC_FW_INSTALL_TIMEOUT	(25 * 60)
+#define IONIC_FW_ACTIVATE_TIMEOUT	30
+
+/* Number of periodic log updates during fw file download */
+#define IONIC_FW_INTERVAL_FRACTION	32
+
+static void ionic_dev_cmd_firmware_download(struct ionic_dev *idev, u64 addr,
+					    u32 offset, u32 length)
 {
 	union ionic_dev_cmd cmd = {
 		.fw_download.opcode = IONIC_CMD_FW_DOWNLOAD,
-		.fw_download.offset = offset,
-		.fw_download.addr = addr,
-		.fw_download.length = length
+		.fw_download.offset = cpu_to_le32(offset),
+		.fw_download.addr = cpu_to_le64(addr),
+		.fw_download.length = cpu_to_le32(length)
 	};
 
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-static void
-ionic_dev_cmd_firmware_install(struct ionic_dev *idev)
+static void ionic_dev_cmd_firmware_install(struct ionic_dev *idev)
 {
 	union ionic_dev_cmd cmd = {
 		.fw_control.opcode = IONIC_CMD_FW_CONTROL,
@@ -34,8 +44,7 @@ ionic_dev_cmd_firmware_install(struct ionic_dev *idev)
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-static void
-ionic_dev_cmd_firmware_status(struct ionic_dev *idev)
+static void ionic_dev_cmd_firmware_install_status(struct ionic_dev *idev)
 {
 	union ionic_dev_cmd cmd = {
 		.fw_control.opcode = IONIC_CMD_FW_CONTROL,
@@ -45,54 +54,87 @@ ionic_dev_cmd_firmware_status(struct ionic_dev *idev)
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-static void
-ionic_dev_cmd_firmware_activate(struct ionic_dev *idev, uint8_t slot)
+static void ionic_dev_cmd_firmware_activate(struct ionic_dev *idev, u8 slot)
 {
 	union ionic_dev_cmd cmd = {
 		.fw_control.opcode = IONIC_CMD_FW_CONTROL,
-		.fw_control.oper = IONIC_FW_ACTIVATE,
+		.fw_control.oper = IONIC_FW_ACTIVATE_ASYNC,
 		.fw_control.slot = slot
 	};
 
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-int
-ionic_firmware_update(struct ionic_lif *lif, const void *const fw_data, u32 fw_sz)
+static void ionic_dev_cmd_firmware_activate_status(struct ionic_dev *idev)
+{
+	union ionic_dev_cmd cmd = {
+		.fw_control.opcode = IONIC_CMD_FW_CONTROL,
+		.fw_control.oper = IONIC_FW_ACTIVATE_STATUS,
+	};
+
+	ionic_dev_cmd_go(idev, &cmd);
+}
+
+int ionic_firmware_update(struct ionic_lif *lif, const char *fw_name)
 {
 	struct ionic_dev *idev = &lif->ionic->idev;
 	struct net_device *netdev = lif->netdev;
 	struct ionic *ionic = lif->ionic;
 	union ionic_dev_cmd_comp comp;
 	u32 buf_sz, copy_sz, offset;
+	const struct firmware *fw;
+	struct devlink *dl;
+	int next_interval;
 	int err = 0;
 	u8 fw_slot;
 
+	netdev_info(netdev, "Installing firmware %s\n", fw_name);
+
+	dl = priv_to_devlink(ionic);
+	devlink_flash_update_begin_notify(dl);
+	devlink_flash_update_status_notify(dl, "Preparing to flash", NULL, 0, 0);
+
+	err = request_firmware(&fw, fw_name, ionic->dev);
+	if (err)
+		goto err_out;
+
 	buf_sz = sizeof(idev->dev_cmd_regs->data);
 
-	netdev_info(netdev,
-		"downloading firmware - size %d part_sz %d nparts %d\n",
-		fw_sz, buf_sz, DIV_ROUND_UP(fw_sz, buf_sz));
+	netdev_dbg(netdev,
+		   "downloading firmware - size %d part_sz %d nparts %lu\n",
+		   (int)fw->size, buf_sz, DIV_ROUND_UP(fw->size, buf_sz));
 
+	devlink_flash_update_status_notify(dl, "Downloading", NULL, 0, fw->size);
 	offset = 0;
-	while (offset < fw_sz) {
-		copy_sz = min(buf_sz, fw_sz - offset);
+	next_interval = fw->size / IONIC_FW_INTERVAL_FRACTION;
+	while (offset < fw->size) {
+		copy_sz = min_t(unsigned int, buf_sz, fw->size - offset);
 		mutex_lock(&ionic->dev_cmd_lock);
-		memcpy_toio(&idev->dev_cmd_regs->data, fw_data + offset, copy_sz);
+		memcpy_toio(&idev->dev_cmd_regs->data, fw->data + offset, copy_sz);
 		ionic_dev_cmd_firmware_download(idev,
-			offsetof(union ionic_dev_cmd_regs, data), offset, copy_sz);
+						offsetof(union ionic_dev_cmd_regs, data),
+						offset, copy_sz);
 		err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
 		mutex_unlock(&ionic->dev_cmd_lock);
 		if (err) {
 			netdev_err(netdev,
-				"download failed offset 0x%x addr 0x%lx len 0x%x\n",
-				offset, offsetof(union ionic_dev_cmd_regs, data), copy_sz);
+				   "download failed offset 0x%x addr 0x%lx len 0x%x\n",
+				   offset, offsetof(union ionic_dev_cmd_regs, data),
+				   copy_sz);
 			goto err_out;
 		}
 		offset += copy_sz;
+
+		if (offset > next_interval) {
+			devlink_flash_update_status_notify(dl, "Downloading",
+							   NULL, offset, fw->size);
+			next_interval = offset + (fw->size / IONIC_FW_INTERVAL_FRACTION);
+		}
 	}
+	devlink_flash_update_status_notify(dl, "Downloading", NULL, 1, 1);
 
 	netdev_info(netdev, "installing firmware\n");
+	devlink_flash_update_status_notify(dl, "Installing", NULL, 0, 2);
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_firmware_install(idev);
@@ -105,26 +147,46 @@ ionic_firmware_update(struct ionic_lif *lif, const void *const fw_data, u32 fw_s
 		goto err_out;
 	}
 
+	devlink_flash_update_status_notify(dl, "Installing", NULL, 1, 2);
 	mutex_lock(&ionic->dev_cmd_lock);
-	ionic_dev_cmd_firmware_status(idev);
+	ionic_dev_cmd_firmware_install_status(idev);
 	err = ionic_dev_cmd_wait(ionic, IONIC_FW_INSTALL_TIMEOUT);
 	mutex_unlock(&ionic->dev_cmd_lock);
 	if (err) {
 		netdev_err(netdev, "firmware install failed\n");
 		goto err_out;
 	}
+	devlink_flash_update_status_notify(dl, "Installing", NULL, 2, 2);
 
-	netdev_info(netdev, "activating firmware - slot %d\n", fw_slot);
+	netdev_info(netdev, "selecting firmware\n");
+	devlink_flash_update_status_notify(dl, "Selecting", NULL, 0, 2);
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_firmware_activate(idev, fw_slot);
-	err = ionic_dev_cmd_wait(ionic, IONIC_FW_ACTIVATE_TIMEOUT);
+	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
 	mutex_unlock(&ionic->dev_cmd_lock);
 	if (err) {
-		netdev_err(netdev, "firmware activation failed\n");
+		netdev_err(netdev, "failed to start firmware select\n");
 		goto err_out;
 	}
 
+	devlink_flash_update_status_notify(dl, "Selecting", NULL, 1, 2);
+	mutex_lock(&ionic->dev_cmd_lock);
+	ionic_dev_cmd_firmware_activate_status(idev);
+	err = ionic_dev_cmd_wait(ionic, IONIC_FW_ACTIVATE_TIMEOUT);
+	mutex_unlock(&ionic->dev_cmd_lock);
+	if (err) {
+		netdev_err(netdev, "firmware select failed\n");
+		goto err_out;
+	}
+	devlink_flash_update_status_notify(dl, "Selecting", NULL, 2, 2);
+
+	netdev_info(netdev, "Firmware update completed\n");
+
 err_out:
+	if (err)
+		devlink_flash_update_status_notify(dl, "Flash failed", NULL, 0, 0);
+	release_firmware(fw);
+	devlink_flash_update_end_notify(dl);
 	return err;
 }

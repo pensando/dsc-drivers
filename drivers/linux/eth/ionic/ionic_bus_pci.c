@@ -78,18 +78,11 @@ void ionic_bus_free_irq_vectors(struct ionic *ionic)
 
 struct net_device *ionic_alloc_netdev(struct ionic *ionic)
 {
-	struct ionic_lif *lif;
-	int nqueues;
+	dev_dbg(ionic->dev, "nxqs=%d nlifs=%d nintrs=%d\n",
+		ionic->ntxqs_per_lif, ionic->nlifs, ionic->nintrs);
 
-	/* Create a netdev big enough to handle all the queues
-	 * needed for lif0 and any macvlan slave lifs.
-	 */
-	nqueues = ionic->ntxqs_per_lif + (ionic->nlifs - 1);
-	dev_dbg(ionic->dev, "nxqs=%d nlifs=%d nqueues=%d nintrs=%d\n",
-		ionic->ntxqs_per_lif, ionic->nlifs,
-		nqueues, ionic->nintrs);
-
-	return alloc_etherdev_mqs(sizeof(*lif), nqueues, nqueues);
+	return alloc_etherdev_mqs(sizeof(struct ionic_lif),
+				  ionic->ntxqs_per_lif, ionic->ntxqs_per_lif);
 }
 
 static int ionic_map_bars(struct ionic *ionic)
@@ -250,8 +243,8 @@ static int ionic_sriov_configure(struct pci_dev *pdev, int num_vfs)
 	struct device *dev = ionic->dev;
 	int ret = 0;
 
-	if (ionic->master_lif &&
-	    test_bit(IONIC_LIF_F_FW_RESET, ionic->master_lif->state))
+	if (ionic->lif &&
+	    test_bit(IONIC_LIF_F_FW_RESET, ionic->lif->state))
 		return -EBUSY;
 
 	if (num_vfs > 0) {
@@ -337,6 +330,7 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(dev, "Cannot identify device: %d, aborting\n", err);
 		goto err_out_teardown;
 	}
+	ionic_debugfs_add_ident(ionic);
 
 	err = ionic_init(ionic);
 	if (err) {
@@ -357,29 +351,22 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_out_reset;
 	}
 
-	/* Configure LIFs */
-	err = ionic_lif_identify(ionic, IONIC_LIF_TYPE_CLASSIC,
-				 &ionic->ident.lif);
+	/* Allocate and init the LIF */
+	err = ionic_lif_size(ionic);
 	if (err) {
-		dev_err(dev, "Cannot identify LIFs: %d, aborting\n", err);
+		dev_err(dev, "Cannot size LIF: %d, aborting\n", err);
 		goto err_out_port_reset;
 	}
 
-	err = ionic_lifs_size(ionic);
+	err = ionic_lif_alloc(ionic);
 	if (err) {
-		dev_err(dev, "Cannot size LIFs: %d, aborting\n", err);
-		goto err_out_port_reset;
-	}
-
-	err = ionic_lifs_alloc(ionic);
-	if (err) {
-		dev_err(dev, "Cannot allocate LIFs: %d, aborting\n", err);
+		dev_err(dev, "Cannot allocate LIF: %d, aborting\n", err);
 		goto err_out_free_irqs;
 	}
 
-	err = ionic_lifs_init(ionic);
+	err = ionic_lif_init(ionic->lif);
 	if (err) {
-		dev_err(dev, "Cannot init LIFs: %d, aborting\n", err);
+		dev_err(dev, "Cannot init LIF: %d, aborting\n", err);
 		goto err_out_free_lifs;
 	}
 
@@ -392,22 +379,28 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			dev_err(dev, "Cannot enable existing VFs: %d\n", err);
 	}
 
-	err = ionic_lifs_register(ionic);
+	err = ionic_lif_register(ionic->lif);
 	if (err) {
-		dev_err(dev, "Cannot register LIFs: %d, aborting\n", err);
+		dev_err(dev, "Cannot register LIF: %d, aborting\n", err);
 		goto err_out_deinit_lifs;
 	}
 
 	err = ionic_devlink_register(ionic);
-	if (err)
+	if (err) {
 		dev_err(dev, "Cannot register devlink: %d\n", err);
+		goto err_out_deregister_lifs;
+	}
 
 	return 0;
 
+err_out_deregister_lifs:
+	ionic_lif_unregister(ionic->lif);
 err_out_deinit_lifs:
-	ionic_lifs_deinit(ionic);
+	ionic_vf_dealloc(ionic);
+	ionic_lif_deinit(ionic->lif);
 err_out_free_lifs:
-	ionic_lifs_free(ionic);
+	ionic_lif_free(ionic->lif);
+	ionic->lif = NULL;
 err_out_free_irqs:
 	ionic_bus_free_irq_vectors(ionic);
 err_out_port_reset:
@@ -415,6 +408,7 @@ err_out_port_reset:
 err_out_reset:
 	ionic_reset(ionic);
 err_out_teardown:
+	del_timer_sync(&ionic->watchdog_timer);
 	ionic_dev_teardown(ionic);
 	pci_clear_master(pdev);
 	/* Don't fail the probe for these errors, keep
@@ -444,11 +438,14 @@ static void ionic_remove(struct pci_dev *pdev)
 	if (!ionic)
 		return;
 
-	if (ionic->master_lif) {
+	del_timer_sync(&ionic->watchdog_timer);
+
+	if (ionic->lif) {
 		ionic_devlink_unregister(ionic);
-		ionic_lifs_unregister(ionic);
-		ionic_lifs_deinit(ionic);
-		ionic_lifs_free(ionic);
+		ionic_lif_unregister(ionic->lif);
+		ionic_lif_deinit(ionic->lif);
+		ionic_lif_free(ionic->lif);
+		ionic->lif = NULL;
 		ionic_bus_free_irq_vectors(ionic);
 	}
 

@@ -212,6 +212,8 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 	struct ionic_intr_info *intr = &qcq->intr;
 	struct debugfs_blob_wrapper *desc_blob;
 	struct device *dev = lif->ionic->dev;
+	struct ionic_tx_stats *txqstats;
+	struct ionic_rx_stats *rxqstats;
 	struct ionic_queue *q = &qcq->q;
 	struct ionic_cq *cq = &qcq->cq;
 	struct dentry *stats_dentry;
@@ -221,8 +223,12 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		return;
 	qcq->dentry = qcq_dentry;
 
-	debugfs_create_x32("total_size", 0400, qcq_dentry, &qcq->total_size);
-	debugfs_create_x64("base_pa", 0400, qcq_dentry, &qcq->base_pa);
+	debugfs_create_x64("q_base_pa", 0400, qcq_dentry, &qcq->q_base_pa);
+	debugfs_create_x32("q_size", 0400, qcq_dentry, &qcq->q_size);
+	debugfs_create_x64("cq_base_pa", 0400, qcq_dentry, &qcq->cq_base_pa);
+	debugfs_create_x32("cq_size", 0400, qcq_dentry, &qcq->cq_size);
+	debugfs_create_x64("sg_base_pa", 0400, qcq_dentry, &qcq->sg_base_pa);
+	debugfs_create_x32("sg_size", 0400, qcq_dentry, &qcq->sg_size);
 
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)))
 	debugfs_create_u8("armed", 0400, qcq_dentry, (u8 *)&qcq->armed);
@@ -235,13 +241,6 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		return;
 
 	debugfs_create_u32("index", 0400, q_dentry, &q->index);
-	debugfs_create_x64("base_pa", 0400, q_dentry, &q->base_pa);
-	if (qcq->flags & IONIC_QCQ_F_SG) {
-		debugfs_create_x64("sg_base_pa", 0400, q_dentry,
-				   &q->sg_base_pa);
-		debugfs_create_u32("sg_desc_size", 0400, q_dentry,
-				   &q->sg_desc_size);
-	}
 	debugfs_create_u32("num_descs", 0400, q_dentry, &q->num_descs);
 	debugfs_create_u32("desc_size", 0400, q_dentry, &q->desc_size);
 	debugfs_create_u32("pid", 0400, q_dentry, &q->pid);
@@ -275,48 +274,50 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		stats_dentry = debugfs_create_dir("tx_stats", q_dentry);
 		if (IS_ERR_OR_NULL(stats_dentry))
 			return;
+		txqstats = &lif->txqstats[q->index];
 
 		debugfs_create_u64("dma_map_err", 0400, stats_dentry,
-				   &qcq->stats->tx.dma_map_err);
+				   &txqstats[q->index].dma_map_err);
 		debugfs_create_u64("pkts", 0400, stats_dentry,
-				   &qcq->stats->tx.pkts);
+				   &txqstats[q->index].pkts);
 		debugfs_create_u64("bytes", 0400, stats_dentry,
-				   &qcq->stats->tx.bytes);
+				   &txqstats[q->index].bytes);
 		debugfs_create_u64("clean", 0400, stats_dentry,
-				   &qcq->stats->tx.clean);
+				   &txqstats[q->index].clean);
 		debugfs_create_u64("linearize", 0400, stats_dentry,
-				   &qcq->stats->tx.linearize);
+				   &txqstats[q->index].linearize);
 		debugfs_create_u64("csum_none", 0400, stats_dentry,
-				   &qcq->stats->tx.csum_none);
+				   &txqstats[q->index].csum_none);
 		debugfs_create_u64("csum", 0400, stats_dentry,
-				   &qcq->stats->tx.csum);
+				   &txqstats[q->index].csum);
 		debugfs_create_u64("crc32_csum", 0400, stats_dentry,
-				   &qcq->stats->tx.crc32_csum);
+				   &txqstats[q->index].crc32_csum);
 		debugfs_create_u64("tso", 0400, stats_dentry,
-				   &qcq->stats->tx.tso);
+				   &txqstats[q->index].tso);
 		debugfs_create_u64("frags", 0400, stats_dentry,
-				   &qcq->stats->tx.frags);
+				   &txqstats[q->index].frags);
 	}
 
 	if (qcq->flags & IONIC_QCQ_F_RX_STATS) {
 		stats_dentry = debugfs_create_dir("rx_stats", q_dentry);
 		if (IS_ERR_OR_NULL(stats_dentry))
 			return;
+		rxqstats = &lif->rxqstats[q->index];
 
 		debugfs_create_u64("dma_map_err", 0400, stats_dentry,
-				   &qcq->stats->rx.dma_map_err);
+				   &rxqstats[q->index].dma_map_err);
 		debugfs_create_u64("alloc_err", 0400, stats_dentry,
-				   &qcq->stats->rx.alloc_err);
+				   &rxqstats[q->index].alloc_err);
 		debugfs_create_u64("pkts", 0400, stats_dentry,
-				   &qcq->stats->rx.pkts);
+				   &rxqstats[q->index].pkts);
 		debugfs_create_u64("bytes", 0400, stats_dentry,
-				   &qcq->stats->rx.bytes);
+				   &rxqstats[q->index].bytes);
 		debugfs_create_u64("csum_none", 0400, stats_dentry,
-				   &qcq->stats->rx.csum_none);
+				   &rxqstats[q->index].csum_none);
 		debugfs_create_u64("csum_complete", 0400, stats_dentry,
-				   &qcq->stats->rx.csum_complete);
+				   &rxqstats[q->index].csum_complete);
 		debugfs_create_u64("csum_error", 0400, stats_dentry,
-				   &qcq->stats->rx.csum_error);
+				   &rxqstats[q->index].csum_error);
 	}
 
 	cq_dentry = debugfs_create_dir("cq", qcq_dentry);
@@ -351,6 +352,8 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 				   &intr->index);
 		debugfs_create_u32("vector", 0400, intr_dentry,
 				   &intr->vector);
+		debugfs_create_u32("dim_coal_hw", 0400, intr_dentry,
+				   &intr->dim_coal_hw);
 
 		intr_ctrl_regset = devm_kzalloc(dev, sizeof(*intr_ctrl_regset),
 						GFP_KERNEL);

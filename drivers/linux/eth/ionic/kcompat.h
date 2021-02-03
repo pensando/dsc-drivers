@@ -33,7 +33,10 @@
 #include <asm/io.h>
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
+
+#if IS_ENABLED(CONFIG_NET_DEVLINK)
 #include <net/devlink.h>
+#endif
 
 #ifndef GCC_VERSION
 #define GCC_VERSION (__GNUC__ * 10000		\
@@ -167,6 +170,10 @@ struct msix_entry {
 
 #if !defined(HAVE_FREE_NETDEV) && ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
 #define free_netdev(x)	kfree(x)
+#endif
+
+#ifndef dynamic_hex_dump
+#define dynamic_hex_dump(...)
 #endif
 
 #ifdef HAVE_POLL_CONTROLLER
@@ -759,11 +766,69 @@ struct _kc_ethtool_pauseparam {
 	alloc_ordered_workqueue("%s", WQ_MEM_RECLAIM, name)
 #endif
 
-/* Ubuntu Release ABI in pre-release packages ends up with a funky
- * number like '050109', which looks like an octal number but has
- * a '9' in it, and the compiler complains.  Since we don't use
- * these macros in our driver anyway, we can chop them out.  -sln
+/* Ubuntu Release ABI is the 4th digit of their kernel version. You can find
+ * it in /usr/src/linux/$(uname -r)/include/generated/utsrelease.h for new
+ * enough versions of Ubuntu. Otherwise you can simply see it in the output of
+ * uname as the 4th digit of the kernel. The UTS_UBUNTU_RELEASE_ABI is not in
+ * the linux-source package, but in the linux-headers package. It begins to
+ * appear in later releases of 14.04 and 14.10.
+ *
+ * Ex:
+ * <Ubuntu 14.04.1>
+ *  $uname -r
+ *  3.13.0-45-generic
+ * ABI is 45
+ *
+ * <Ubuntu 14.10>
+ *  $uname -r
+ *  3.16.0-23-generic
+ * ABI is 23
  */
+#ifndef UTS_UBUNTU_RELEASE_ABI
+#define UTS_UBUNTU_RELEASE_ABI 0
+#define UBUNTU_VERSION_CODE 0
+#else
+/* Ubuntu does not provide actual release version macro, so we use the kernel
+ * version plus the ABI to generate a unique version code specific to Ubuntu.
+ * In addition, we mask the lower 8 bits of LINUX_VERSION_CODE in order to
+ * ignore differences in sublevel which are not important since we have the
+ * ABI value. Otherwise, it becomes impossible to correlate ABI to version for
+ * ordering checks.
+ */
+
+/* The UTS_UBUNTU_RELEASE_ABI value for upstream kernels built as Debian
+ * packages comes out to things like 050807, which looks like an octal because
+ * it starts with a '0', but has an '8' which is an invalid octal digit, and
+ * the preprocessor complains and quits.  Until we need to care about
+ * differences in that number, we can simply replace it with a fake value.
+ */
+#undef UTS_UBUNTU_RELEASE_ABI
+#define UTS_UBUNTU_RELEASE_ABI 0
+
+#define UBUNTU_VERSION_CODE (((~0xFF & LINUX_VERSION_CODE) << 8) + \
+			     UTS_UBUNTU_RELEASE_ABI)
+
+#if UTS_UBUNTU_RELEASE_ABI > 255
+#error UTS_UBUNTU_RELEASE_ABI is too large...
+#endif /* UTS_UBUNTU_RELEASE_ABI > 255 */
+
+#if ( LINUX_VERSION_CODE <= KERNEL_VERSION(3,0,0) )
+/* Our version code scheme does not make sense for non 3.x or newer kernels,
+ * and we have no support in kcompat for this scenario. Thus, treat this as a
+ * non-Ubuntu kernel. Possibly might be better to error here.
+ */
+#define UTS_UBUNTU_RELEASE_ABI 0
+#define UBUNTU_VERSION_CODE 0
+#endif
+
+#endif
+
+/* Note that the 3rd digit is always zero, and will be ignored. This is
+ * because Ubuntu kernels are based on x.y.0-ABI values, and while their linux
+ * version codes are 3 digit, this 3rd digit is superseded by the ABI value.
+ */
+#define UBUNTU_VERSION(a,b,c,d) ((KERNEL_VERSION(a,b,0) << 8) + (d))
+
 
 /* SuSE version macros are the same as Linux kernel version macro */
 #ifndef SLE_VERSION
@@ -5661,7 +5726,10 @@ static inline unsigned char *skb_checksum_start(const struct sk_buff *skb)
 }
 #endif
 
-#if !(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7,2))) && \
+#if !(UBUNTU_VERSION_CODE && \
+		UBUNTU_VERSION_CODE >= UBUNTU_VERSION(4,4,0,0)) && \
+	!(RHEL_RELEASE_CODE && \
+		(RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7,2))) && \
 	!(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0)))
 static inline void napi_consume_skb(struct sk_buff *skb,
 				    int __always_unused budget)
@@ -6448,6 +6516,7 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 }
 #endif /* !(RHEL >= 7.7 && RHEL != 8.0) */
 #else /* >= 5.0.0 */
+#define HAVE_PHC_GETTIMEX64
 #define HAVE_PTP_SYS_OFFSET_EXTENDED_IOCTL
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
 #define HAVE_DMA_ALLOC_COHERENT_ZEROES_MEM
@@ -6530,6 +6599,14 @@ _kc_devlink_port_attrs_set(struct devlink_port *devlink_port,
  /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,3,0))
 
+static inline s32 scaled_ppm_to_ppb(long ppm)
+{
+	s64 ppb = 1 + ppm;
+	ppb *= 125;
+	ppb >>= 13;
+	return (s32) ppb;
+}
+
 #if (!RHEL_RELEASE_CODE || \
      (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,2))))
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
@@ -6571,6 +6648,7 @@ devlink_flash_update_status_notify(struct devlink __always_unused *devlink,
 
 #else /* >= 5.6.0 */
 #define HAVE_TX_TIMEOUT_TXQUEUE
+#define HAVE_HWSTAMP_TX_ONESTEP_P2P
 #endif /* 5.6.0 */
 
 /*****************************************************************************/
@@ -6582,6 +6660,7 @@ devlink_flash_update_status_notify(struct devlink __always_unused *devlink,
 
 #ifdef HAVE_DEVLINK_REGIONS
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
+#if (!RHEL_RELEASE_CODE || (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,3))))
 #include <net/devlink.h>
 
 struct devlink_region_ops {
@@ -6601,6 +6680,7 @@ _kc_devlink_region_create(struct devlink *devlink,
 
 #define devlink_region_create _kc_devlink_region_create
 #endif /* devlink_region_create */
+#endif /* RHEL_RELEASE_CODE */
 #endif /* CONFIG_NET_DEVLINK */
 #define HAVE_DEVLINK_SNAPSHOT_CREATE_DESTRUCTOR
 #endif /* HAVE_DEVLINK_REGIONS */
@@ -6608,5 +6688,22 @@ _kc_devlink_region_create(struct devlink *devlink,
 #define HAVE_DEVLINK_REGION_OPS_SNAPSHOT
 #define HAVE_ETHTOOL_COALESCE_PARAMS_SUPPORT
 #endif /* 5.7.0 */
+
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0))
+#else
+#define HAVE_DEVLINK_UPDATE_PARAMS
+#endif /* 5.10.0 */
+
+/* we will not support PTP for kernels without HAVE_PTP_CLOCK_DO_AUX_WORK */
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+#undef CONFIG_PTP_1588_CLOCK
+#undef CONFIG_PTP_1588_CLOCK_MODULE
+#endif
+/* and not on suse kernels (needs more compat work) */
+#ifdef CONFIG_SUSE_KERNEL
+#undef CONFIG_PTP_1588_CLOCK
+#undef CONFIG_PTP_1588_CLOCK_MODULE
+#endif
 
 #endif /* _KCOMPAT_H_ */

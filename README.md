@@ -44,6 +44,26 @@ The Makefile in drivers/linux will build all three drivers when
 ARCH=aarch64, else will build the host version of ionic.  Simply cd to
 the drivers/linux directory and type 'make'.
 
+Well, okay maybe not that simple any more - it should be, but some things
+changed in the makefiles internally, and it's a little more complex.  Also,
+we wanted to keep this archive closer to what is used internally.
+
+If the headers for your current Linux kernel are findable under
+/lib/modules with kernel config values defined, this should work:
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.4.8\\\"" modules
+
+If the kernel config file doesn't have the Pensando configuration strings
+set in it, you can add them in the make line.
+
+For Naples drivers:
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.4.8\\\"" CONFIG_IONIC_MNIC=m CONFIG_MNET=m CONFIG_MNET_UIO_PDRV_GENIRQ=m modules
+
+For the host driver:
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.4.8\\\"" CONFIG_IONIC=m modules
+
+As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
+    make -C <kernel-header-path> M=`pwd` ...
+
 ## History
 
 2020-07-07 - initial drivers using 1.8.0-E-48
@@ -56,4 +76,15 @@ the drivers/linux directory and type 'make'.
  - Kcompat fixes for newer upstream and Red Hat kernels
  - Add interrupt affinity option for mnic_ionic use
  - Other optimizations and stability fixes
+
+2021-02-02 - driver updates to 1.15.4-C-8
+ - Added support for PTP
+ - Dropped support for macvlan offload
+ - Cleaned some 'sparse' complaints
+ - Add support for devlink firmware update
+ - Dynamic interrupt coalescing
+ - Add support for separate Tx interrupts
+ - Rework queue reconfiguration for better memory handling
+ - Reorder some configuration steps to remove race conditions
+ - Changes to napi handling for better performance
 

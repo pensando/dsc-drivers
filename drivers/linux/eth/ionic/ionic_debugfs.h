@@ -33,6 +33,7 @@ static inline void ionic_debugfs_add_bars(struct ionic *ionic) { }
 static inline void ionic_debugfs_add_dev_cmd(struct ionic *ionic) { }
 static inline void ionic_debugfs_add_ident(struct ionic *ionic) { }
 static inline void ionic_debugfs_add_sizes(struct ionic *ionic) { }
+static inline void ionic_debugfs_add_eq(struct ionic_eq *eq) { }
 static inline void ionic_debugfs_add_lif(struct ionic_lif *lif) { }
 static inline void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq) { }
 static inline void ionic_debugfs_del_lif(struct ionic_lif *lif) { }

@@ -71,7 +71,7 @@ void *ionic_get_handle_from_netdev(struct net_device *netdev,
  * ionic_api_stay_registered() - stay registered through net interface changes
  * @handle:		Handle to lif
  *
- * Return: true if the slave device should ignore net deregistration events
+ * Return: true if the child device should ignore net deregistration events
  */
 bool ionic_api_stay_registered(void *handle);
 
