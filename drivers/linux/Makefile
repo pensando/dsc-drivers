@@ -3,7 +3,7 @@ obj-$(CONFIG_IONIC) += eth/ionic/
 obj-$(CONFIG_IONIC_MNIC) += eth/ionic/
 obj-$(CONFIG_MNET) += mnet/
 obj-$(CONFIG_MNET_UIO_PDRV_GENIRQ) += mnet_uio_pdrv_genirq/
-obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
+#obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
 else
 
 IONIC_ETH_SRC = $(CURDIR)/eth/ionic
@@ -19,7 +19,6 @@ ETH_KOPT += CONFIG_INFINIBAND_IONIC=_
 RDMA_KOPT += CONFIG_INFINIBAND_IONIC=m
 
 default: all
-ALL = eth
 
 # Discover kernel and open fabrics configuration.
 #
@@ -35,12 +34,15 @@ ifeq ($(ARCH),aarch64)
 
 # Ionic mnic and mnet for drivers ARM
 include ${MKINFRA}/config_${ARCH}.mk
-KSRC ?= $(AARCH64_LINUX_HEADERS)
+KSRC ?= ${NICDIR}/buildroot/output/${ASIC}/linux-headers
+KMOD_OUT_DIR ?= ${BLD_OUT_DIR}/drivers_submake
+KMOD_SRC_DIR ?= ${TOPDIR}/platform/drivers/linux
 ETH_KOPT += CONFIG_IONIC_MNIC=m
 ETH_KOPT += CONFIG_MNET=m
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=m
 ETH_KOPT += CROSS_COMPILE=aarch64-linux-gnu-
 ETH_KOPT += ARCH=arm64
+ALL = mnic
 ALL += mnet
 ALL += mnet_uio_pdrv_genirq
 export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
@@ -48,6 +50,8 @@ export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
 else
 
 # Ionic driver for host
+include linux_ver.mk
+
 KSRC ?= /lib/modules/$(shell uname -r)/build
 ETH_KOPT += CONFIG_IONIC=m
 ETH_KOPT += CONFIG_IONIC_MNIC=_
@@ -55,9 +59,9 @@ ETH_KOPT += CONFIG_MNET=_
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
 
 KCFLAGS = -Werror
-
-include linux_ver.mk
 KCFLAGS += $(EXTRA_CFLAGS)
+
+ALL = eth
 
 # Ionic rdma driver, if present
 ifneq ($(wildcard $(IONIC_RDMA_SRC)),)
@@ -95,7 +99,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "0.0.0"
+    DVER = "1.15.4.8"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
@@ -105,15 +109,22 @@ KOPT += KCFLAGS="$(KCFLAGS)"
 all: $(ALL)
 
 KBUILD_RULE = $(MAKE) -C $(KSRC) $(KOPT) M=$(CURDIR)
-mnet: eth mnet_uio_pdrv_genirq
+
+mnic: KOPT+=$(ETH_KOPT)
+mnic:
+	@echo "===> Building MNIC driver "
+	touch $(BLD_OUT_DIR)/drivers_submake/Makefile
+	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/eth/ionic $(KOPT)
+
 mnet: KOPT+=$(ETH_KOPT)
-mnet:
-	$(KBUILD_RULE)
+mnet: mnet_uio_pdrv_genirq
+	@echo "===> Building MNET driver "
+	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet $(KOPT)
 
 mnet_uio_pdrv_genirq: KOPT+=$(ETH_KOPT)
 mnet_uio_pdrv_genirq:
-	$(KBUILD_RULE)
-
+	@echo "===> Building MNET_UIO driver "
+	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet_uio_pdrv_genirq $(KOPT)
 
 eth: KOPT+=$(ETH_KOPT)
 eth:
@@ -139,6 +150,6 @@ cscope:
 	find $(IONIC_ETH_SRC) $(IONIC_RDMA_SRC) -name '*.[ch]' > cscope.files
 	cscope -bkq
 
-.PHONY: default all eth rdma clean install modules_install cscope
+.PHONY: default all mnic mnet mnet_uio_pdrv_genirq eth rdma clean install modules_install cscope
 
 endif

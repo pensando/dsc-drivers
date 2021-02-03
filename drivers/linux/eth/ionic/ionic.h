@@ -6,8 +6,6 @@
 
 struct ionic_lif;
 
-#include <linux/radix-tree.h>
-
 #include "kcompat.h"
 
 #include "ionic_if.h"
@@ -28,7 +26,10 @@ struct ionic_lif;
 #define SHORT_TIMEOUT   1
 #define MAX_ETH_EQS	64
 
-extern unsigned int max_slaves;
+#define IONIC_PHC_UPDATE_NS	10000000000	    /* 10s in nanoseconds */
+#define NORMAL_PPB		1000000000	    /* one billion parts per billion */
+#define SCALED_PPM		(1000000ull << 16)  /* 2^16 million parts per 2^16 million */
+
 extern unsigned int rx_copybreak;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
@@ -56,8 +57,7 @@ struct ionic {
 	struct ionic_dev_bar bars[IONIC_BARS_MAX];
 	unsigned int num_bars;
 	bool is_mgmt_nic;
-	struct ionic_lif *master_lif;
-	struct radix_tree_root lifs;
+	struct ionic_lif *lif;
 	struct ionic_eq **eqs;
 	struct ionic_identity ident;
 	unsigned int nnqs_per_lif;
@@ -86,22 +86,8 @@ struct ionic {
 	int watchdog_period;
 };
 
-/* Since we have a bitmap of the allocated eth lifs, we can use
- * that to look up each lif specifically, rather than digging
- * through the whole tree with radix_tree_for_each_slot
- */
-#define for_each_eth_lif(_ion, _bit, _lif) \
-	for ((_bit) = find_first_bit((_ion)->ethbits, IONIC_LIFS_MAX),   \
-		(_lif) = radix_tree_lookup(&(_ion)->lifs, (_bit));       \
-	     (_bit) < IONIC_LIFS_MAX;                                    \
-	     (_bit) = find_next_bit((_ion)->ethbits,                     \
-				    IONIC_LIFS_MAX, ((_bit) + 1)),       \
-		(_lif) = radix_tree_lookup(&(_ion)->lifs, (_bit)))
-
-int ionic_napi(struct napi_struct *napi, int budget, ionic_cq_cb cb,
-	       ionic_cq_done_cb done_cb, void *done_arg);
-
 int ionic_adminq_post(struct ionic_lif *lif, struct ionic_admin_ctx *ctx);
+int ionic_adminq_wait(struct ionic_lif *lif, struct ionic_admin_ctx *ctx, int err);
 int ionic_adminq_post_wait(struct ionic_lif *lif, struct ionic_admin_ctx *ctx);
 int ionic_dev_cmd_wait(struct ionic *ionic, unsigned long max_wait);
 int ionic_set_dma_mask(struct ionic *ionic);

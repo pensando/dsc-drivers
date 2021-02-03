@@ -47,13 +47,13 @@ endif
 
 # Kernel Search Path
 # All the places we look for kernel source
-KSP :=  /lib/modules/${BUILD_KERNEL}/source \
-        /lib/modules/${BUILD_KERNEL}/build \
+KSP :=  /lib/modules/${BUILD_KERNEL}/build \
+	/lib/modules/${BUILD_KERNEL}/source \
         /usr/src/linux-${BUILD_KERNEL} \
-        /usr/src/linux-$(${BUILD_KERNEL} | sed 's/-.*//') \
+        /usr/src/linux-$(shell echo ${BUILD_KERNEL} | sed 's/-.*//') \
         /usr/src/kernel-headers-${BUILD_KERNEL} \
         /usr/src/kernel-source-${BUILD_KERNEL} \
-        /usr/src/linux-$(${BUILD_KERNEL} | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/') \
+        /usr/src/linux-$(shell echo ${BUILD_KERNEL} | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/') \
         /usr/src/linux \
         /usr/src/kernels/${BUILD_KERNEL} \
         /usr/src/kernels
@@ -61,7 +61,7 @@ KSP :=  /lib/modules/${BUILD_KERNEL}/source \
 # prune the list down to only values that exist and have an include/linux
 # sub-directory. We can't use include/config because some older kernels don't
 # have this.
-test_dir = $(shell [ -e ${dir}/include/linux ] && echo ${dir})
+test_dir = $(shell [ -e ${dir}/include/linux -o -e ${dir}/include/generated ] && echo ${dir})
 KSP := $(foreach dir, ${KSP}, ${test_dir})
 
 # we will use this first valid entry in the search path

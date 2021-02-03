@@ -16,6 +16,8 @@
 
 #define DOORBELL_PG_SIZE        0x8
 
+#define TSTAMP_SIZE             0x8
+
 #define MNET_NODE_NAME_LEN      0x8
 
 struct mnet_dev_t {
@@ -72,6 +74,10 @@ struct platform_device *mnet_get_platform_device(struct mnet_dev_t *mnet,
 			.flags    = IORESOURCE_MEM,
 			.start    = req->doorbell_pa,
 			.end      = req->doorbell_pa + DOORBELL_PG_SIZE - 1
+		}, {/*tstamp*/
+			.flags    = IORESOURCE_MEM,
+			.start    = req->tstamp_pa,
+			.end      = req->tstamp_pa + TSTAMP_SIZE - 1
 		}
 	};
 

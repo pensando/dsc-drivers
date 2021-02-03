@@ -22,9 +22,9 @@ void *ionic_get_handle_from_netdev(struct net_device *netdev,
 	if (!lif || !lif->nrdma_eqs)
 		return ERR_PTR(-ENXIO);
 
-	/* TODO: Rework if supporting more than one slave */
-	if (lif->slave_lif_cfg.prsn != IONIC_PRSN_NONE &&
-	    lif->slave_lif_cfg.prsn != prsn)
+	/* TODO: Rework if supporting more than one child */
+	if (lif->child_lif_cfg.prsn != IONIC_PRSN_NONE &&
+	    lif->child_lif_cfg.prsn != prsn)
 		return ERR_PTR(-EBUSY);
 
 	return lif;
@@ -46,7 +46,7 @@ void ionic_api_request_reset(void *handle)
 
 	union ionic_dev_cmd cmd = {
 		.cmd.opcode = IONIC_CMD_RDMA_RESET_LIF,
-		.cmd.lif_index = cpu_to_le16(lif->slave_lif_cfg.index),
+		.cmd.lif_index = cpu_to_le16(lif->child_lif_cfg.index),
 	};
 
 	ionic = lif->ionic;
@@ -63,9 +63,9 @@ void ionic_api_request_reset(void *handle)
 		return;
 	}
 
-	if (lif->slave_lif_cfg.priv &&
-	    lif->slave_lif_cfg.reset_cb)
-		(*lif->slave_lif_cfg.reset_cb)(lif->slave_lif_cfg.priv);
+	if (lif->child_lif_cfg.priv &&
+	    lif->child_lif_cfg.reset_cb)
+		(*lif->child_lif_cfg.reset_cb)(lif->child_lif_cfg.priv);
 }
 EXPORT_SYMBOL_GPL(ionic_api_request_reset);
 
@@ -73,10 +73,10 @@ void *ionic_api_get_private(void *handle, enum ionic_api_prsn prsn)
 {
 	struct ionic_lif *lif = handle;
 
-	if (lif->slave_lif_cfg.prsn != prsn)
+	if (lif->child_lif_cfg.prsn != prsn)
 		return NULL;
 
-	return lif->slave_lif_cfg.priv;
+	return lif->child_lif_cfg.priv;
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_private);
 
@@ -85,22 +85,10 @@ int ionic_api_set_private(void *handle, void *priv,
 			  enum ionic_api_prsn prsn)
 {
 	struct ionic_lif *lif = handle;
-	struct ionic_lif_cfg *cfg = &lif->slave_lif_cfg;
+	struct ionic_lif_cfg *cfg = &lif->child_lif_cfg;
 
 	if (priv && cfg->priv)
 		return -EBUSY;
-
-	if (lif->ionic->nlifs > 1) {
-		if (priv) {
-			/* Allocate a new slave LIF bit */
-			cfg->index = ionic_slave_alloc(lif->ionic, prsn);
-			if (cfg->index < 0)
-				return -ENOSPC;
-		} else if (cfg->priv) {
-			/* Free the existing slave LIF bit */
-			ionic_slave_free(lif->ionic, cfg->index);
-		}
-	}
 
 	cfg->priv = priv;
 	cfg->prsn = prsn;
@@ -140,7 +128,7 @@ const union ionic_lif_identity *ionic_api_get_identity(void *handle,
 	struct ionic_lif *lif = handle;
 
 	if (lif_index)
-		*lif_index = lif->slave_lif_cfg.index;
+		*lif_index = lif->child_lif_cfg.index;
 
 	/* TODO: Do all LIFs have the same ident? */
 	return &lif->ionic->ident.lif;
