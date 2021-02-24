@@ -99,7 +99,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "1.15.4.8"
+    DVER = "1.15.5.4"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"

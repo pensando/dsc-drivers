@@ -56,10 +56,10 @@ If the kernel config file doesn't have the Pensando configuration strings
 set in it, you can add them in the make line.
 
 For Naples drivers:
-    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.4.8\\\"" CONFIG_IONIC_MNIC=m CONFIG_MNET=m CONFIG_MNET_UIO_PDRV_GENIRQ=m modules
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.5.4\\\"" CONFIG_IONIC_MNIC=m CONFIG_MNET=m CONFIG_MNET_UIO_PDRV_GENIRQ=m modules
 
 For the host driver:
-    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.4.8\\\"" CONFIG_IONIC=m modules
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.5.4\\\"" CONFIG_IONIC=m modules
 
 As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
     make -C <kernel-header-path> M=`pwd` ...
@@ -88,3 +88,10 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - Reorder some configuration steps to remove race conditions
  - Changes to napi handling for better performance
 
+2021-02-24 - driver updates to 1.15.5-C-4
+ - Add weak links for PTP api for compile and load on DSC kernel without PTP support
+ - Don't set up PTP in ionic_mnic if PTP bar is not available
+ - Closed a small window to prevent starting queues when in FW reset
+ - Other small bug fixes to PTP support
+ - Compat fixes for compiling on Linux v5.11
+ - Guard against adminq use after free

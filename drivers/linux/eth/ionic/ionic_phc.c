@@ -485,6 +485,9 @@ void ionic_lif_alloc_phc(struct ionic_lif *lif)
 	u64 delay, diff, mult, frac = 0;
 	u32 shift;
 
+	if (!ionic->idev.hwstamp_regs)
+		return;
+
 	if (!(ionic->ident.lif.eth.config.features & IONIC_ETH_HW_TIMESTAMP))
 		return;
 

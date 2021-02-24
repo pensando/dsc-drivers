@@ -413,6 +413,8 @@ static void ionic_qcq_free(struct ionic_lif *lif, struct ionic_qcq *qcq)
 static void ionic_qcqs_free(struct ionic_lif *lif)
 {
 	struct device *dev = lif->ionic->dev;
+	struct ionic_qcq *adminqcq;
+	unsigned long irqflags;
 
 	if (lif->notifyqcq) {
 		ionic_qcq_free(lif, lif->notifyqcq);
@@ -421,9 +423,14 @@ static void ionic_qcqs_free(struct ionic_lif *lif)
 	}
 
 	if (lif->adminqcq) {
-		ionic_qcq_free(lif, lif->adminqcq);
-		devm_kfree(dev, lif->adminqcq);
+		spin_lock_irqsave(&lif->adminq_lock, irqflags);
+		adminqcq = READ_ONCE(lif->adminqcq);
 		lif->adminqcq = NULL;
+		spin_unlock_irqrestore(&lif->adminq_lock, irqflags);
+		if (adminqcq) {
+			ionic_qcq_free(lif, adminqcq);
+			devm_kfree(dev, adminqcq);
+		}
 	}
 
 	if (lif->rxqcqs) {
@@ -920,7 +927,7 @@ int ionic_lif_create_hwstamp_txq(struct ionic_lif *lif)
 	else
 		sg_desc_sz = sizeof(struct ionic_txq_sg_desc);
 
-	txq_i = lif->nxqs;
+	txq_i = lif->ionic->ntxqs_per_lif;
 	flags = IONIC_QCQ_F_TX_STATS | IONIC_QCQ_F_SG;
 
 	err = ionic_qcq_alloc(lif, IONIC_QTYPE_TXQ, txq_i, "hwstamp_tx", flags,
@@ -985,7 +992,7 @@ int ionic_lif_create_hwstamp_rxq(struct ionic_lif *lif)
 	comp_sz = 2 * sizeof(struct ionic_rxq_comp);
 	sg_desc_sz = sizeof(struct ionic_rxq_sg_desc);
 
-	rxq_i = lif->nxqs;
+	rxq_i = lif->ionic->nrxqs_per_lif;
 	flags = IONIC_QCQ_F_RX_STATS | IONIC_QCQ_F_SG;
 
 	err = ionic_qcq_alloc(lif, IONIC_QTYPE_RXQ, rxq_i, "hwstamp_rx", flags,
@@ -1041,6 +1048,12 @@ int ionic_lif_config_hwstamp_rxq_all(struct ionic_lif *lif, bool rx_all)
 		qparam.rxq_features = IONIC_Q_F_2X_CQ_DESC | IONIC_RXQ_F_HWSTAMP;
 	} else {
 		qparam.rxq_features = 0;
+	}
+
+	/* if we're not running, just set the values and return */
+	if (!netif_running(lif->netdev)) {
+		lif->rxq_features = qparam.rxq_features;
+		return 0;
 	}
 
 	return ionic_reconfigure_queues(lif, &qparam);
@@ -1221,6 +1234,7 @@ static int ionic_adminq_napi(struct napi_struct *napi, int budget)
 	struct ionic_intr_info *intr = napi_to_cq(napi)->bound_intr;
 	struct ionic_lif *lif = napi_to_cq(napi)->lif;
 	struct ionic_dev *idev = &lif->ionic->idev;
+	unsigned long irqflags;
 	unsigned int flags = 0;
 	int rx_work = 0;
 	int tx_work = 0;
@@ -1233,9 +1247,11 @@ static int ionic_adminq_napi(struct napi_struct *napi, int budget)
 		n_work = ionic_cq_service(&lif->notifyqcq->cq, budget,
 					  ionic_notifyq_service, NULL, NULL);
 
+	spin_lock_irqsave(&lif->adminq_lock, irqflags);
 	if (lif->adminqcq && lif->adminqcq->flags & IONIC_QCQ_F_INITED)
 		a_work = ionic_cq_service(&lif->adminqcq->cq, budget,
 					  ionic_adminq_service, NULL, NULL);
+	spin_unlock_irqrestore(&lif->adminq_lock, irqflags);
 
 	if (lif->hwstamp_rxq)
 		rx_work = ionic_cq_service(&lif->hwstamp_rxq->cq, budget,
@@ -1248,7 +1264,7 @@ static int ionic_adminq_napi(struct napi_struct *napi, int budget)
 	work_done = max(max(n_work, a_work), max(rx_work, tx_work));
 	if (work_done < budget && napi_complete_done(napi, work_done)) {
 		flags |= IONIC_INTR_CRED_UNMASK;
-		lif->adminqcq->cq.bound_intr->rearm_count++;
+		intr->rearm_count++;
 	}
 
 	if (work_done || flags) {
@@ -2332,7 +2348,8 @@ static int ionic_start_queues(struct ionic_lif *lif)
 	/* If we've noticed that the device is in a broken state, don't
 	 * attempt to bring the queues back up.
 	 */
-	if (test_bit(IONIC_LIF_F_BROKEN, lif->state))
+	if (test_bit(IONIC_LIF_F_BROKEN, lif->state) ||
+	    test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return -EIO;
 
 	err = ionic_txrx_enable(lif);
@@ -3837,8 +3854,12 @@ int ionic_lif_size(struct ionic *ionic)
 
 	/* reserve last queue id for hardware timestamping */
 	if (lc->features & IONIC_ETH_HW_TIMESTAMP) {
-		ntxqs_per_lif -= 1;
-		nrxqs_per_lif -= 1;
+		if (ntxqs_per_lif <= 1 || nrxqs_per_lif <= 1) {
+			lc->features &= ~IONIC_ETH_HW_TIMESTAMP;
+		} else {
+			ntxqs_per_lif -= 1;
+			nrxqs_per_lif -= 1;
+		}
 	}
 
 	/* limit TxRx queuepairs and RDMA event queues to num cpu */

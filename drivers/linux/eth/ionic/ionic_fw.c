@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
-#include <linux/firmware.h>
 
 #include "ionic.h"
 #include "ionic_dev.h"
@@ -75,28 +74,20 @@ static void ionic_dev_cmd_firmware_activate_status(struct ionic_dev *idev)
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-int ionic_firmware_update(struct ionic_lif *lif, const char *fw_name)
+int ionic_firmware_update(struct ionic_lif *lif, const struct firmware *fw)
 {
 	struct ionic_dev *idev = &lif->ionic->idev;
 	struct net_device *netdev = lif->netdev;
 	struct ionic *ionic = lif->ionic;
 	union ionic_dev_cmd_comp comp;
 	u32 buf_sz, copy_sz, offset;
-	const struct firmware *fw;
 	struct devlink *dl;
 	int next_interval;
 	int err = 0;
 	u8 fw_slot;
 
-	netdev_info(netdev, "Installing firmware %s\n", fw_name);
-
 	dl = priv_to_devlink(ionic);
-	devlink_flash_update_begin_notify(dl);
 	devlink_flash_update_status_notify(dl, "Preparing to flash", NULL, 0, 0);
-
-	err = request_firmware(&fw, fw_name, ionic->dev);
-	if (err)
-		goto err_out;
 
 	buf_sz = sizeof(idev->dev_cmd_regs->data);
 
@@ -186,7 +177,29 @@ int ionic_firmware_update(struct ionic_lif *lif, const char *fw_name)
 err_out:
 	if (err)
 		devlink_flash_update_status_notify(dl, "Flash failed", NULL, 0, 0);
-	release_firmware(fw);
+	return err;
+}
+
+int ionic_firmware_fetch_and_update(struct ionic_lif *lif, const char *fw_name)
+{
+	const struct firmware *fw;
+	struct devlink *dl;
+	int err;
+
+	netdev_info(lif->netdev, "Installing firmware %s\n", fw_name);
+
+	dl = priv_to_devlink(lif->ionic);
+	devlink_flash_update_begin_notify(dl);
+
+	err = request_firmware(&fw, fw_name, lif->ionic->dev);
+	if (err)
+		goto err_out;
+
+	err = ionic_firmware_update(lif, fw);
+
+err_out:
 	devlink_flash_update_end_notify(dl);
+	release_firmware(fw);
+
 	return err;
 }
