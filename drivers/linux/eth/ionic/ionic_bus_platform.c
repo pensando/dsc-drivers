@@ -19,6 +19,8 @@
 #define IONIC_MSIX_CFG_BAR    2
 #define IONIC_DOORBELL_BAR    3
 #define IONIC_TSTAMP_BAR      4
+
+#define IONIC_REQUIRED_BARS   4
 #define IONIC_NUM_OF_BAR      5
 
 #define IONIC_INTR_MSIXCFG_STRIDE     0x10
@@ -195,7 +197,7 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 	struct ionic_dev *idev = &ionic->idev;
 	u32 sig;
 
-	if (num_bars < IONIC_NUM_OF_BAR)
+	if (num_bars < IONIC_REQUIRED_BARS)
 		return -EFAULT;
 
 	idev->dev_info_regs = ionic->bars[IONIC_DEV_BAR].vaddr;
@@ -203,7 +205,10 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 					offsetof(union ionic_dev_regs, devcmd);
 	idev->intr_ctrl = ionic->bars[IONIC_INTR_CTRL_BAR].vaddr;
 	idev->msix_cfg_base = ionic->bars[IONIC_MSIX_CFG_BAR].vaddr;
-	idev->hwstamp_regs = ionic->bars[IONIC_TSTAMP_BAR].vaddr;
+	if (num_bars > IONIC_TSTAMP_BAR)
+		idev->hwstamp_regs = ionic->bars[IONIC_TSTAMP_BAR].vaddr;
+	else
+		idev->hwstamp_regs = NULL;
 
 	/* save the idev into dev->platform_data so we can use it later */
 	ionic->dev->platform_data = idev;
@@ -289,7 +294,7 @@ phys_addr_t ionic_bus_phys_dbpage(struct ionic *ionic, int page_num)
 	return 0;
 }
 
-static int ionic_probe(struct platform_device *pfdev)
+int ionic_probe(struct platform_device *pfdev)
 {
 	struct device *dev = &pfdev->dev;
 	struct ionic *ionic;
@@ -364,30 +369,29 @@ static int ionic_probe(struct platform_device *pfdev)
 	err = ionic_lif_alloc(ionic);
 	if (err) {
 		dev_err(dev, "Cannot allocate LIF: %d, aborting\n", err);
-		goto err_out_free_lifs;
+		goto err_out_free_irqs;
 	}
 
 	err = ionic_lif_init(ionic->lif);
 	if (err) {
 		dev_err(dev, "Cannot init LIF: %d, aborting\n", err);
-		goto err_out_deinit_lifs;
+		goto err_out_free_lifs;
 	}
 
 	err = ionic_lif_register(ionic->lif);
 	if (err) {
 		dev_err(dev, "Cannot register LIF: %d, aborting\n", err);
-		goto err_out_unregister_lifs;
+		goto err_out_deinit_lifs;
 	}
 
 	return 0;
 
-err_out_unregister_lifs:
-	ionic_lif_unregister(ionic->lif);
 err_out_deinit_lifs:
 	ionic_lif_deinit(ionic->lif);
 err_out_free_lifs:
 	ionic_lif_free(ionic->lif);
 	ionic->lif = NULL;
+err_out_free_irqs:
 	ionic_bus_free_irq_vectors(ionic);
 err_out_unmap_bars:
 	ionic_unmap_bars(ionic);
@@ -399,7 +403,7 @@ err_out_unmap_bars:
 }
 EXPORT_SYMBOL_GPL(ionic_probe);
 
-static int ionic_remove(struct platform_device *pfdev)
+int ionic_remove(struct platform_device *pfdev)
 {
 	struct ionic *ionic = platform_get_drvdata(pfdev);
 

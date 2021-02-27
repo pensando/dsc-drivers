@@ -33,7 +33,8 @@ static void ionic_watchdog_cb(struct timer_list *t)
 
 	/* check link if we're waiting for link to come back up */
 	if (hb >= 0 && netif_running(lif->netdev) &&
-	    !test_bit(IONIC_LIF_F_UP, lif->state)) {
+	    !test_bit(IONIC_LIF_F_UP, lif->state) &&
+	    !test_bit(IONIC_LIF_F_FW_RESET, lif->state)) {
 		ionic_link_status_check_request(lif, CAN_NOT_SLEEP);
 	}
 }

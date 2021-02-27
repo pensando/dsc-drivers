@@ -6695,6 +6695,14 @@ _kc_devlink_region_create(struct devlink *devlink,
 #define HAVE_DEVLINK_UPDATE_PARAMS
 #endif /* 5.10.0 */
 
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0))
+#else
+#define HAVE_DEVLINK_PREFETCH_FW
+static inline void devlink_flash_update_begin_notify(struct devlink *dl) { }
+static inline void devlink_flash_update_end_notify(struct devlink *dl) { }
+#endif /* 5.11.0 */
+
 /* we will not support PTP for kernels without HAVE_PTP_CLOCK_DO_AUX_WORK */
 #ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
 #undef CONFIG_PTP_1588_CLOCK

@@ -4,11 +4,14 @@
 #ifndef _IONIC_DEVLINK_H_
 #define _IONIC_DEVLINK_H_
 
+#include <linux/firmware.h>
+
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
 #include <net/devlink.h>
 #endif
 
-int ionic_firmware_update(struct ionic_lif *lif, const char *fw_name);
+int ionic_firmware_update(struct ionic_lif *lif, const struct firmware *fw);
+int ionic_firmware_fetch_and_update(struct ionic_lif *lif, const char *fw_name);
 
 /* make sure we've got a new-enough devlink support to use dev info */
 #ifdef DEVLINK_INFO_VERSION_GENERIC_BOARD_ID

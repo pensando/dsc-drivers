@@ -98,13 +98,13 @@ struct platform_device *mnet_get_platform_device(struct mnet_dev_t *mnet,
 		return NULL;
 	}
 
-	mnic_name = devm_kzalloc(mnet_device, MNIC_NAME_LEN, GFP_KERNEL);
+	mnic_name = devm_kzalloc(mnet_device, MNIC_NAME_LEN+1, GFP_KERNEL);
 	if (!pdev->name) {
 		dev_err(mnet_device, "Can't allocate memory for mnic_name\n");
 		return NULL;
 	}
 
-	strcpy(mnic_name, req->iface_name);
+	strncpy(mnic_name, req->iface_name, MNIC_NAME_LEN);
 	pdev->name = mnic_name;
 
 	return pdev;
@@ -116,7 +116,7 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	struct mnet_dev_t *mnet;
 	uint8_t found_dev_node = 0;
 	struct mnet_dev_create_req_t req;
-	char iface_name[MNIC_NAME_LEN] = {0};
+	char iface_name[MNIC_NAME_LEN+1] = {0};
 	void __user *argp = (void __user *)arg;
 
 	switch (cmd) {
@@ -184,7 +184,7 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
 		list_for_each_entry(mnet, &mnet_list, node) {
 			/* find the mnet device which is bound to this interface */
-			if (!strcmp(mnet->mnic_pdev->name, iface_name)) {
+			if (!strncmp(mnet->mnic_pdev->name, iface_name, MNIC_NAME_LEN)) {
 				found_dev_node = 1;
 				break;
 			}
@@ -230,7 +230,7 @@ static int mnet_probe(struct platform_device *pfdev)
 static int mnet_remove(struct platform_device *pfdev)
 {
 	struct mnet_dev_t *mnet, *tmp;
-	int ret;
+	int ret = 0;
 
     list_for_each_entry_safe(mnet, tmp, &mnet_list, node) {
         if (mnet->mnic_pdev) {

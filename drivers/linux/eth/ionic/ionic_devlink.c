@@ -17,7 +17,11 @@ static int ionic_dl_flash_update(struct devlink *dl,
 {
 	struct ionic *ionic = devlink_priv(dl);
 
-	return ionic_firmware_update(ionic->lif, params->file_name);
+#ifdef HAVE_DEVLINK_PREFETCH_FW
+	return ionic_firmware_update(ionic->lif, params->fw);
+#else
+	return ionic_firmware_fetch_and_update(ionic->lif, params->file_name);
+#endif
 }
 #else
 static int ionic_dl_flash_update(struct devlink *dl,
@@ -30,7 +34,7 @@ static int ionic_dl_flash_update(struct devlink *dl,
 	if (component)
 		return -EOPNOTSUPP;
 
-	return ionic_firmware_update(ionic->lif, fwname);
+	return ionic_firmware_fetch_and_update(ionic->lif, fwname);
 }
 #endif /* HAVE_DEVLINK_UPDATE_PARAMS */
 
