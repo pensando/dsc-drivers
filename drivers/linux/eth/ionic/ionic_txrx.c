@@ -769,7 +769,7 @@ static int ionic_tx_map_skb(struct ionic_queue *q, struct sk_buff *skb,
 		dma_addr = ionic_tx_map_frag(q, frag, 0, skb_frag_size(frag));
 		if (dma_mapping_error(dev, dma_addr)) {
 			stats->dma_map_err++;
-			return -EIO;
+			goto dma_fail;
 		}
 		buf_info->dma_addr = dma_addr;
 		buf_info->len = skb_frag_size(frag);
@@ -779,6 +779,17 @@ static int ionic_tx_map_skb(struct ionic_queue *q, struct sk_buff *skb,
 	desc_info->nbufs = 1 + nfrags;
 
 	return 0;
+
+dma_fail:
+	/* unwind the frag mappings and the head mapping */
+	while (frag_idx > 0) {
+		frag_idx--;
+		buf_info--;
+		dma_unmap_page(dev, buf_info->dma_addr,
+			       buf_info->len, DMA_TO_DEVICE);
+	}
+	dma_unmap_single(dev, buf_info->dma_addr, buf_info->len, DMA_TO_DEVICE);
+	return -EIO;
 }
 
 static void ionic_tx_clean(struct ionic_queue *q,

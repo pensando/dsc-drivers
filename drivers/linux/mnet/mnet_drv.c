@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2017-2021 Pensando Systems, Inc */
+
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/netdevice.h>
@@ -9,15 +12,10 @@
 #include "mnet_drv.h"
 
 #define DEVINFO_SIZE            0x1000
-
 #define DRVCFG_SIZE             0x80
-
 #define MSIXCFG_SIZE            0x40
-
 #define DOORBELL_PG_SIZE        0x8
-
 #define TSTAMP_SIZE             0x8
-
 #define MNET_NODE_NAME_LEN      0x8
 
 struct mnet_dev_t {
@@ -53,9 +51,9 @@ static int mnet_close(struct inode *i, struct file *f)
 struct platform_device *mnet_get_platform_device(struct mnet_dev_t *mnet,
 		struct mnet_dev_create_req_t *req)
 {
-	int ret = 0;
 	struct platform_device *pdev;
 	char *mnic_name = NULL;
+	int ret = 0;
 
 	struct resource mnic_resource[] = {
 		{ /*devinfo*/
@@ -82,19 +80,19 @@ struct platform_device *mnet_get_platform_device(struct mnet_dev_t *mnet,
 	};
 
 	pdev = of_find_device_by_node(mnet->of_node);
-
-	if (pdev == NULL) {
+	if (!pdev) {
 		dev_err(mnet_device, "Can't find platform_device for of_node %s\n",
-				mnet->of_node->name);
+			mnet->of_node->name);
 		return NULL;
 	}
 
 	/* add resource info */
 	ret = platform_device_add_resources(pdev, mnic_resource,
-			ARRAY_SIZE(mnic_resource));
+					    ARRAY_SIZE(mnic_resource));
 	if (ret) {
-		dev_err(mnet_device, "Can't add mem resource to platform_device"
-				"for %s device\n", req->iface_name);
+		dev_err(mnet_device,
+			"Can't add mem resource to platform_device for %s device\n",
+			req->iface_name);
 		return NULL;
 	}
 
@@ -112,12 +110,12 @@ struct platform_device *mnet_get_platform_device(struct mnet_dev_t *mnet,
 
 static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
-	int ret = 0;
-	struct mnet_dev_t *mnet;
-	uint8_t found_dev_node = 0;
-	struct mnet_dev_create_req_t req;
-	char iface_name[MNIC_NAME_LEN+1] = {0};
 	void __user *argp = (void __user *)arg;
+	char iface_name[MNIC_NAME_LEN+1] = {0};
+	struct mnet_dev_create_req_t req;
+	uint8_t found_dev_node = 0;
+	struct mnet_dev_t *mnet;
+	int ret = 0;
 
 	switch (cmd) {
 
@@ -132,7 +130,7 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		}
 
 		if (!found_dev_node) {
-			dev_err(mnet_device, "Dev node not found \n");
+			dev_err(mnet_device, "Dev node not found\n");
 			return -EDQUOT;
 		}
 
@@ -142,26 +140,23 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		}
 
 		mnet->mnic_pdev = mnet_get_platform_device(mnet, &req);
-
 		if (!mnet->mnic_pdev) {
-			dev_err(mnet_device, "Can't get platform_device \n");
+			dev_err(mnet_device, "Can't get platform_device\n");
 			ret = -ENXIO;
 			break;
 		}
 		mnet->is_uio_dev = req.is_uio_dev;
 		dev_info(mnet_device, "MNET_CREATE_DEV called iface name %s (uio_dev: %s)\n",
-                 req.iface_name, mnet->is_uio_dev ? "True" : "False");
+			 req.iface_name, mnet->is_uio_dev ? "True" : "False");
 
 		/* call probe with this platform_device */
-		if (mnet->is_uio_dev) {
+		if (mnet->is_uio_dev)
 			ret = mnet_uio_pdrv_genirq_probe(mnet->mnic_pdev);
-		} else {
+		else
 			ret = ionic_probe(mnet->mnic_pdev);
-		}
 		if (ret) {
 			dev_err(mnet_device, "mnic probe for %s failed with err: %d\n",
-					mnet->mnic_pdev->name, ret);
-
+				mnet->mnic_pdev->name, ret);
 			break;
 		}
 
@@ -169,18 +164,17 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		mnet->busy = 1;
 
 		dev_info(mnet_device, "mnic device :%s created successfully!\n",
-				mnet->mnic_pdev->name);
+			 mnet->mnic_pdev->name);
 
 		break;
 
 	case MNET_DESTROY_DEV:
 
-		ret = copy_from_user(iface_name, argp, MNIC_NAME_LEN) ?
-				-EFAULT : 0;
+		ret = copy_from_user(iface_name, argp, MNIC_NAME_LEN) ? -EFAULT : 0;
 		if (ret)
 			break;
 
-		dev_info(mnet_device, "Removing mnic device: %s \n", iface_name);
+		dev_info(mnet_device, "Removing mnic device: %s\n", iface_name);
 
 		list_for_each_entry(mnet, &mnet_list, node) {
 			/* find the mnet device which is bound to this interface */
@@ -199,8 +193,9 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			else
 				ret = ionic_remove(mnet->mnic_pdev);
 			if (ret) {
-				dev_err(mnet_device, "ionic_remove failed to remove %s "
-						"interface\n", mnet->mnic_pdev->name);
+				dev_err(mnet_device,
+					"ionic_remove failed to remove %s interface\n",
+					mnet->mnic_pdev->name);
 				break;
 			}
 
@@ -208,7 +203,7 @@ static long mnet_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			mnet->busy = 0;
 
 			dev_info(mnet_device, "mnic device :%s removed successfully!\n",
-                    iface_name);
+				 iface_name);
 		}
 
 		break;
@@ -232,31 +227,30 @@ static int mnet_remove(struct platform_device *pfdev)
 	struct mnet_dev_t *mnet, *tmp;
 	int ret = 0;
 
-    list_for_each_entry_safe(mnet, tmp, &mnet_list, node) {
-        if (mnet->mnic_pdev) {
-            if (mnet->busy) {
-                dev_info(mnet_device, "Removing device "
-                         "mnic interface %s\n\n\n", mnet->mnic_pdev->name);
-                if (mnet->is_uio_dev) {
-                    ret = mnet_uio_pdrv_genirq_remove(mnet->mnic_pdev);
-                } else {
-                    ret = ionic_remove(mnet->mnic_pdev);
-                }
+	list_for_each_entry_safe(mnet, tmp, &mnet_list, node) {
+		if (mnet->mnic_pdev && mnet->busy) {
+			dev_info(mnet_device,
+				 "Removing device mnic interface %s\n\n\n",
+				 mnet->mnic_pdev->name);
+			if (mnet->is_uio_dev)
+				ret = mnet_uio_pdrv_genirq_remove(mnet->mnic_pdev);
+			else
+				ret = ionic_remove(mnet->mnic_pdev);
 
-				if (ret) {
-					dev_err(mnet_device, "ionic_remove failed to remove %s "
-							"interface\n", mnet->mnic_pdev->name);
-					break;
-				}
-
-				dev_info(mnet_device, "Successfully Removed "
-						"mnic interface %s\n", mnet->mnic_pdev->name);
-
-				/* Mark mnet as free since we are detached from mnic */
-				mnet->mnic_pdev = NULL;
+			if (ret) {
+				dev_err(mnet_device,
+					"ionic_remove failed to remove %s interface\n",
+					mnet->mnic_pdev->name);
+				break;
 			}
+
+			dev_info(mnet_device,
+				 "Successfully Removed mnic interface %s\n",
+				 mnet->mnic_pdev->name);
 		}
 
+		/* Mark mnet as free since we are detached from mnic */
+		mnet->mnic_pdev = NULL;
 		mnet->busy = 0;
 
 		list_del(&mnet->node);
@@ -265,7 +259,7 @@ static int mnet_remove(struct platform_device *pfdev)
 	return ret;
 }
 
-static struct of_device_id mnet_of_match[] = {
+static const struct of_device_id mnet_of_match[] = {
 	{.compatible = "pensando,mnet"},
 	{/* end of table */}
 };
@@ -289,9 +283,9 @@ static const struct file_operations mnet_fops = {
 
 static int __init mnet_init(void)
 {
-	int ret, i;
 	char of_node_name[MNET_NODE_NAME_LEN + 1] = {0, };
 	struct mnet_dev_t *mnet_inst;
+	int ret, i;
 
 	mnet_class = class_create(THIS_MODULE, DRV_NAME);
 	if (IS_ERR(mnet_class)) {
@@ -308,8 +302,7 @@ static int __init mnet_init(void)
 	pr_info("Pensando mnet driver: mnet_major = %d\n", mnet_major);
 
 	mnet_device = device_create(mnet_class, NULL,
-			MKDEV(mnet_major, 0), NULL, DRV_NAME);
-
+				    MKDEV(mnet_major, 0), NULL, DRV_NAME);
 	if (IS_ERR(mnet_device)) {
 		pr_err("Failed to create device %s", DRV_NAME);
 		ret = PTR_ERR(mnet_class);
@@ -324,7 +317,8 @@ static int __init mnet_init(void)
 
 	ret = cdev_add(&mnet_cdev, mnet_dev, 1);
 	if (ret) {
-		dev_err(mnet_device, "Error in adding character device %s. Exiting...\n", MNET_CHAR_DEV_NAME);
+		dev_err(mnet_device, "Error in adding character device %s. Exiting...\n",
+			MNET_CHAR_DEV_NAME);
 		goto error_device_add;
 	}
 
@@ -332,7 +326,7 @@ static int __init mnet_init(void)
 
 		mnet_inst = devm_kzalloc(mnet_device, sizeof(*mnet_inst), GFP_KERNEL);
 
-		if (mnet_inst == NULL) {
+		if (!mnet_inst) {
 			ret = PTR_ERR(mnet_class);
 			goto error_device_add;
 		}
@@ -352,7 +346,7 @@ static int __init mnet_init(void)
 		of_node_put(mnet_inst->of_node);
 	}
 
-	return platform_driver_register(&mnet_driver);;
+	return platform_driver_register(&mnet_driver);
 
 error_device_add:
 	device_destroy(mnet_class, mnet_major);
@@ -370,8 +364,6 @@ static void __exit mnet_cleanup(void)
 	device_destroy(mnet_class, MKDEV(mnet_major, 0));
 	unregister_chrdev_region(mnet_dev, NUM_MNET_DEVICES);
 	class_destroy(mnet_class);
-
-	return;
 }
 
 module_init(mnet_init);

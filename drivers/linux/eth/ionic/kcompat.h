@@ -7,8 +7,11 @@
 #ifndef LINUX_VERSION_CODE
 #include <linux/version.h>
 #else
+#ifndef KERNEL_VERSION
 #define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
 #endif
+#endif
+#include <linux/atomic.h>
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -5002,7 +5005,7 @@ static inline struct pci_dev *pci_upstream_bridge(struct pci_dev *dev)
 
 #if ( LINUX_VERSION_CODE > KERNEL_VERSION(2,6,20) )
 #define devm_kcalloc(dev, cnt, size, flags) \
-	devm_kzalloc(dev, cnt * size, flags)
+	devm_kzalloc(dev, (cnt) * (size), flags)
 #endif /* > 2.6.20 */
 
 #if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,2)))
@@ -5816,6 +5819,7 @@ struct udp_tunnel_info {
 
 #if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))
 #define HAVE_TCF_EXTS_TO_LIST
+#define HAVE_PCI_IRQ_API
 #endif
 
 #if !(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0))) &&\
@@ -5864,6 +5868,7 @@ pci_release_mem_regions(struct pci_dev *pdev)
 #define HAVE_UDP_ENC_RX_OFFLOAD
 #define HAVE_TCF_EXTS_TO_LIST
 #define HAVE_ETHTOOL_NEW_50G_BITS
+#define HAVE_PCI_IRQ_API
 #endif /* 4.8.0 */
 
 /*****************************************************************************/
@@ -6336,6 +6341,45 @@ void _kc_pcie_print_link_status(struct pci_dev *dev);
 #endif /* 4.17.0 */
 
 /*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)) || (RHEL_RELEASE_CODE /* not in rhel yet */)
+#ifndef atomic_long_try_cmpxchg_relaxed
+#ifdef CONFIG_64BIT
+#define ATOMIC_LONG_TYPE long int
+#ifndef ATOMIC_LONG_PFX
+#define ATOMIC_LONG_PFX(x) atomic64 ## x
+#endif
+#ifndef atomic64_cmpxchg_relaxed
+#define atomic64_cmpxchg_relaxed	atomic64_cmpxchg
+#define atomic64_cmpxchg_acquire	atomic64_cmpxchg
+#define atomic64_cmpxchg_release	atomic64_cmpxchg
+#endif
+#else
+#define ATOMIC_LONG_TYPE int
+#ifndef ATOMIC_LONG_PFX
+#define ATOMIC_LONG_PFX(x) atomic ## x
+#endif
+#ifndef atomic_cmpxchg_relaxed
+#define atomic_cmpxchg_relaxed	atomic_cmpxchg
+#define atomic_cmpxchg_acquire	atomic_cmpxchg
+#define atomic_cmpxchg_release	atomic_cmpxchg
+#endif
+#endif
+#define __al_try_cmpxchg(type, _p, _po, _n)			\
+({									\
+	ATOMIC_LONG_TYPE *__po = (_po);					\
+	ATOMIC_LONG_TYPE __r, __o = *(ATOMIC_LONG_TYPE *)(__po);	\
+	__r = ATOMIC_LONG_PFX(_cmpxchg##type)((_p), __o, (_n));		\
+	if (unlikely(__r != __o))					\
+		*(ATOMIC_LONG_TYPE *)__po = __r;			\
+	likely(__r == __o);						\
+})
+#define atomic_long_try_cmpxchg(l, old, new) __al_try_cmpxchg(, l, old, new)
+#define atomic_long_try_cmpxchg_relaxed(l, old, new) __al_try_cmpxchg(_relaxed, l, old, new)
+#define atomic_long_try_cmpxchg_acquire(l, old, new) __al_try_cmpxchg(_acquire, l, old, new)
+#define atomic_long_try_cmpxchg_release(l, old, new) __al_try_cmpxchg(_release, l, old, new)
+#endif
+#endif
+
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0))
 #ifdef NETIF_F_HW_L2FW_DOFFLOAD
 #include <linux/if_macvlan.h>
@@ -6394,6 +6438,7 @@ enum devlink_port_flavour {
 #endif /* CONFIG_NET_DEVLINK */
 #endif /* <RHEL7.7 */
 #endif /* !SLES || SLES < 15.1 */
+
 #else
 #include <linux/overflow.h>
 #include <net/xdp_sock.h>

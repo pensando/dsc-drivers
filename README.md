@@ -95,3 +95,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - Other small bug fixes to PTP support
  - Compat fixes for compiling on Linux v5.11
  - Guard against adminq use after free
+
+2021-03-29 - driver updates to 1.15.6-C-8
+ - better error case handling
+ - bug fixes for PTP support and error handling
+ - clean up mnet code to upstream code format standards
+ - updates for compiling under v5.10

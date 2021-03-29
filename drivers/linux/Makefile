@@ -3,7 +3,7 @@ obj-$(CONFIG_IONIC) += eth/ionic/
 obj-$(CONFIG_IONIC_MNIC) += eth/ionic/
 obj-$(CONFIG_MNET) += mnet/
 obj-$(CONFIG_MNET_UIO_PDRV_GENIRQ) += mnet_uio_pdrv_genirq/
-#obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
+obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
 else
 
 IONIC_ETH_SRC = $(CURDIR)/eth/ionic
@@ -43,9 +43,11 @@ ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=m
 ETH_KOPT += CROSS_COMPILE=aarch64-linux-gnu-
 ETH_KOPT += ARCH=arm64
 ALL = mnic
-ALL += mnet
 ALL += mnet_uio_pdrv_genirq
+ALL += mnet
 export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
+
+KSYMS = "KBUILD_EXTRA_SYMBOLS=${KMOD_OUT_DIR}/Module.symvers.mnic ${KMOD_OUT_DIR}/Module.symvers.uio"
 
 else
 
@@ -99,7 +101,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "1.15.5.4"
+    DVER = "1.15.6.8"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
@@ -115,16 +117,18 @@ mnic:
 	@echo "===> Building MNIC driver "
 	touch $(BLD_OUT_DIR)/drivers_submake/Makefile
 	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/eth/ionic $(KOPT)
-
-mnet: KOPT+=$(ETH_KOPT)
-mnet: mnet_uio_pdrv_genirq
-	@echo "===> Building MNET driver "
-	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet $(KOPT)
+	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.mnic
 
 mnet_uio_pdrv_genirq: KOPT+=$(ETH_KOPT)
 mnet_uio_pdrv_genirq:
 	@echo "===> Building MNET_UIO driver "
 	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet_uio_pdrv_genirq $(KOPT)
+	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.uio
+
+mnet: KOPT+=$(ETH_KOPT)
+mnet: mnet_uio_pdrv_genirq
+	@echo "===> Building MNET driver "
+	$(MAKE) -C $(KSRC) $(KSYMS) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet $(KOPT)
 
 eth: KOPT+=$(ETH_KOPT)
 eth:
