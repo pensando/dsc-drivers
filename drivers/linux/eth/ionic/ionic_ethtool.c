@@ -160,6 +160,13 @@ static int ionic_get_link_ksettings(struct net_device *netdev,
 
 	switch (le16_to_cpu(idev->port_info->status.xcvr.pid)) {
 		/* Copper */
+#ifdef HAVE_ETHTOOL_200G_BITS
+	case IONIC_XCVR_PID_QSFP_200G_CR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     200000baseCR4_Full);
+		copper_seen++;
+		break;
+#endif
 #ifdef HAVE_ETHTOOL_100G_BITS
 	case IONIC_XCVR_PID_QSFP_100G_CR4:
 		ethtool_link_ksettings_add_link_mode(ks, supported,

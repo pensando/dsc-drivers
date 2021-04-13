@@ -83,8 +83,16 @@ int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
 	if (!lif->phc || !lif->phc->ptp)
 		return -EOPNOTSUPP;
 
-	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-		return -EFAULT;
+	if (ifr) {
+		if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+			return -EFAULT;
+	} else {
+		/* if called with ifr == NULL, behave as if called with the
+		 * current ts_config from the initial cleared state.
+		 */
+		memcpy(&config, &lif->phc->ts_config, sizeof(config));
+		memset(&lif->phc->ts_config, 0, sizeof(config));
+	}
 
 	tx_mode = ionic_hwstamp_tx_mode(config.tx_type);
 	if (tx_mode < 0)
@@ -138,10 +146,12 @@ int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
 			goto err_rxall;
 	}
 
-	err = copy_to_user(ifr->ifr_data, &config, sizeof(config));
-	if (err) {
-		err = -EFAULT;
-		goto err_final;
+	if (ifr) {
+		err = copy_to_user(ifr->ifr_data, &config, sizeof(config));
+		if (err) {
+			err = -EFAULT;
+			goto err_final;
+		}
 	}
 
 	memcpy(&lif->phc->ts_config, &config, sizeof(config));
@@ -482,13 +492,16 @@ void ionic_lif_alloc_phc(struct ionic_lif *lif)
 {
 	struct ionic *ionic = lif->ionic;
 	struct ionic_phc *phc;
-	u64 delay, diff, mult, frac = 0;
+	u64 delay, diff, mult;
+	u64 frac = 0;
+	u64 features;
 	u32 shift;
 
 	if (!ionic->idev.hwstamp_regs)
 		return;
 
-	if (!(ionic->ident.lif.eth.config.features & IONIC_ETH_HW_TIMESTAMP))
+	features = le64_to_cpu(ionic->ident.lif.eth.config.features);
+	if (!(features & IONIC_ETH_HW_TIMESTAMP))
 		return;
 
 	phc = devm_kzalloc(ionic->dev, sizeof(*phc), GFP_KERNEL);
@@ -497,16 +510,25 @@ void ionic_lif_alloc_phc(struct ionic_lif *lif)
 
 	phc->lif = lif;
 
-	spin_lock_init(&phc->lock);
-	mutex_init(&phc->config_lock);
-
 	phc->cc.read = ionic_cc_read;
 	phc->cc.mask = le64_to_cpu(ionic->ident.dev.hwstamp_mask);
 	phc->cc.mult = le32_to_cpu(ionic->ident.dev.hwstamp_mult);
 	phc->cc.shift = le32_to_cpu(ionic->ident.dev.hwstamp_shift);
 
+	if (!phc->cc.mult) {
+		dev_err(lif->ionic->dev,
+			"Invalid device PHC mask multiplier %u, disabling HW timestamp support\n",
+			phc->cc.mult);
+		devm_kfree(lif->ionic->dev, phc);
+		lif->phc = NULL;
+		return;
+	}
+
 	dev_dbg(lif->ionic->dev, "Device PHC mask %#llx mult %u shift %u\n",
 		phc->cc.mask, phc->cc.mult, phc->cc.shift);
+
+	spin_lock_init(&phc->lock);
+	mutex_init(&phc->config_lock);
 
 	/* max ticks is limited by the multiplier, or by the update period. */
 	if (phc->cc.shift + 2 + ilog2(IONIC_PHC_UPDATE_NS) >= 64) {

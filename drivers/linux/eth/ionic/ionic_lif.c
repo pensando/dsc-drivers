@@ -712,20 +712,20 @@ static int ionic_qcqs_alloc(struct ionic_lif *lif)
 
 	err = -ENOMEM;
 	lif->txqcqs = devm_kcalloc(dev, lif->ionic->ntxqs_per_lif,
-				   sizeof(struct ionic_qcq *), GFP_KERNEL);
+				   sizeof(*lif->txqcqs), GFP_KERNEL);
 	if (!lif->txqcqs)
 		goto err_out;
 	lif->rxqcqs = devm_kcalloc(dev, lif->ionic->nrxqs_per_lif,
-				   sizeof(struct ionic_qcq *), GFP_KERNEL);
+				   sizeof(*lif->rxqcqs), GFP_KERNEL);
 	if (!lif->rxqcqs)
 		goto err_out;
 
-	lif->txqstats = devm_kcalloc(dev, lif->ionic->ntxqs_per_lif + 1,
-				     sizeof(struct ionic_tx_stats), GFP_KERNEL);
+	lif->txqstats = devm_kcalloc(dev, (lif->ionic->ntxqs_per_lif + 1),
+				     sizeof(*lif->txqstats), GFP_KERNEL);
 	if (!lif->txqstats)
 		goto err_out;
-	lif->rxqstats = devm_kcalloc(dev, lif->ionic->nrxqs_per_lif + 1,
-				     sizeof(struct ionic_rx_stats), GFP_KERNEL);
+	lif->rxqstats = devm_kcalloc(dev, (lif->ionic->nrxqs_per_lif + 1),
+				     sizeof(*lif->rxqstats), GFP_KERNEL);
 	if (!lif->rxqstats)
 		goto err_out;
 
@@ -1120,7 +1120,7 @@ static int ionic_lif_add_hwstamp_rxfilt(struct ionic_lif *lif, u64 pkt_class)
 			.pkt_class = cpu_to_le64(pkt_class),
 		},
 	};
-	u16 qtype;
+	u8 qtype;
 	u32 qid;
 	int err;
 
@@ -1128,10 +1128,10 @@ static int ionic_lif_add_hwstamp_rxfilt(struct ionic_lif *lif, u64 pkt_class)
 		return -EINVAL;
 
 	qtype = lif->hwstamp_rxq->q.type;
-	ctx.cmd.rx_filter_add.qtype = cpu_to_le16(qtype);
+	ctx.cmd.rx_filter_add.qtype = qtype;
 
 	qid = lif->hwstamp_rxq->q.index;
-	ctx.cmd.rx_filter_add.qid = cpu_to_le16(qid);
+	ctx.cmd.rx_filter_add.qid = cpu_to_le32(qid);
 
 	netdev_dbg(lif->netdev, "rx_filter add RXSTEER\n");
 	err = ionic_adminq_post_wait(lif, &ctx);
@@ -2342,15 +2342,17 @@ static int ionic_start_queues(struct ionic_lif *lif)
 {
 	int err;
 
-	if (test_and_set_bit(IONIC_LIF_F_UP, lif->state))
-		return 0;
-
 	/* If we've noticed that the device is in a broken state, don't
 	 * attempt to bring the queues back up.
 	 */
-	if (test_bit(IONIC_LIF_F_BROKEN, lif->state) ||
-	    test_bit(IONIC_LIF_F_FW_RESET, lif->state))
+	if (test_bit(IONIC_LIF_F_BROKEN, lif->state))
 		return -EIO;
+
+	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
+		return -EBUSY;
+
+	if (test_and_set_bit(IONIC_LIF_F_UP, lif->state))
+		return 0;
 
 	err = ionic_txrx_enable(lif);
 	if (err) {
@@ -3229,6 +3231,9 @@ static void ionic_lif_handle_fw_up(struct ionic_lif *lif)
 			goto err_txrx_free;
 	}
 
+	/* restore the hardware timestamping queues */
+	ionic_lif_hwstamp_set(lif, NULL);
+
 	clear_bit(IONIC_LIF_F_FW_RESET, lif->state);
 	ionic_link_status_check_request(lif, CAN_SLEEP);
 	netif_device_attach(lif->netdev);
@@ -3853,9 +3858,9 @@ int ionic_lif_size(struct ionic *ionic)
 	 */
 
 	/* reserve last queue id for hardware timestamping */
-	if (lc->features & IONIC_ETH_HW_TIMESTAMP) {
+	if (lc->features & cpu_to_le64(IONIC_ETH_HW_TIMESTAMP)) {
 		if (ntxqs_per_lif <= 1 || nrxqs_per_lif <= 1) {
-			lc->features &= ~IONIC_ETH_HW_TIMESTAMP;
+			lc->features &= cpu_to_le64(~IONIC_ETH_HW_TIMESTAMP);
 		} else {
 			ntxqs_per_lif -= 1;
 			nrxqs_per_lif -= 1;
