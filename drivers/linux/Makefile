@@ -1,9 +1,9 @@
 ifneq ($(KERNELRELEASE),)
 obj-$(CONFIG_IONIC) += eth/ionic/
 obj-$(CONFIG_IONIC_MNIC) += eth/ionic/
-obj-$(CONFIG_MNET) += mnet/
+obj-$(CONFIG_MDEV) += mdev/
 obj-$(CONFIG_MNET_UIO_PDRV_GENIRQ) += mnet_uio_pdrv_genirq/
-obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
+#obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
 else
 
 IONIC_ETH_SRC = $(CURDIR)/eth/ionic
@@ -32,19 +32,19 @@ default: all
 
 ifeq ($(ARCH),aarch64)
 
-# Ionic mnic and mnet for drivers ARM
+# Ionic mnic and mdev for drivers ARM
 include ${MKINFRA}/config_${ARCH}.mk
 KSRC ?= ${NICDIR}/buildroot/output/${ASIC}/linux-headers
 KMOD_OUT_DIR ?= ${BLD_OUT_DIR}/drivers_submake
 KMOD_SRC_DIR ?= ${TOPDIR}/platform/drivers/linux
 ETH_KOPT += CONFIG_IONIC_MNIC=m
-ETH_KOPT += CONFIG_MNET=m
+ETH_KOPT += CONFIG_MDEV=m
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=m
 ETH_KOPT += CROSS_COMPILE=aarch64-linux-gnu-
 ETH_KOPT += ARCH=arm64
 ALL = mnic
 ALL += mnet_uio_pdrv_genirq
-ALL += mnet
+ALL += mdev
 export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
 
 KSYMS = "KBUILD_EXTRA_SYMBOLS=${KMOD_OUT_DIR}/Module.symvers.mnic ${KMOD_OUT_DIR}/Module.symvers.uio"
@@ -57,7 +57,7 @@ include linux_ver.mk
 KSRC ?= /lib/modules/$(shell uname -r)/build
 ETH_KOPT += CONFIG_IONIC=m
 ETH_KOPT += CONFIG_IONIC_MNIC=_
-ETH_KOPT += CONFIG_MNET=_
+ETH_KOPT += CONFIG_MDEV=_
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
 
 KCFLAGS = -Werror
@@ -101,7 +101,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "1.15.6.8"
+    DVER = "1.15.7.3"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
@@ -125,10 +125,10 @@ mnet_uio_pdrv_genirq:
 	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet_uio_pdrv_genirq $(KOPT)
 	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.uio
 
-mnet: KOPT+=$(ETH_KOPT)
-mnet: mnet_uio_pdrv_genirq
-	@echo "===> Building MNET driver "
-	$(MAKE) -C $(KSRC) $(KSYMS) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mnet $(KOPT)
+mdev: KOPT+=$(ETH_KOPT)
+mdev:
+	@echo "===> Building MDEV driver "
+	$(MAKE) -C $(KSRC) $(KSYMS) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mdev $(KOPT)
 
 eth: KOPT+=$(ETH_KOPT)
 eth:
@@ -154,6 +154,6 @@ cscope:
 	find $(IONIC_ETH_SRC) $(IONIC_RDMA_SRC) -name '*.[ch]' > cscope.files
 	cscope -bkq
 
-.PHONY: default all mnic mnet mnet_uio_pdrv_genirq eth rdma clean install modules_install cscope
+.PHONY: default all mnic mdev mnet_uio_pdrv_genirq eth rdma clean install modules_install cscope
 
 endif

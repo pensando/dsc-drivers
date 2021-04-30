@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2020 Pensando Systems, Inc */
+/* Copyright(c) 2020 - 2021 Pensando Systems, Inc */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -27,7 +27,7 @@ static void ionic_dev_cmd_firmware_download(struct ionic_dev *idev, u64 addr,
 		.fw_download.opcode = IONIC_CMD_FW_DOWNLOAD,
 		.fw_download.offset = cpu_to_le32(offset),
 		.fw_download.addr = cpu_to_le64(addr),
-		.fw_download.length = cpu_to_le32(length)
+		.fw_download.length = cpu_to_le32(length),
 	};
 
 	ionic_dev_cmd_go(idev, &cmd);

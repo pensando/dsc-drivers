@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #ifndef _IONIC_LIF_H_
 #define _IONIC_LIF_H_
@@ -230,7 +230,6 @@ struct ionic_lif {
 	dma_addr_t info_pa;
 	u32 info_sz;
 	struct ionic_qtype_info qtype_info[IONIC_QTYPE_MAX];
-	u8 qtype_ver[IONIC_QTYPE_MAX];
 
 	u16 rss_types;
 	u8 rss_hash_key[IONIC_RSS_HASH_KEY_SIZE];
@@ -272,6 +271,9 @@ struct ionic_phc {
 	struct ptp_clock_info ptp_info;
 	struct ptp_clock *ptp;
 	struct ionic_lif *lif;
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+	struct delayed_work dwork;
+#endif
 };
 #endif
 
@@ -340,6 +342,7 @@ int ionic_lif_identify(struct ionic *ionic, u8 lif_type,
 int ionic_lif_size(struct ionic *ionic);
 
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+void ionic_lif_hwstamp_replay(struct ionic_lif *lif);
 int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr);
 int ionic_lif_hwstamp_get(struct ionic_lif *lif, struct ifreq *ifr);
 ktime_t ionic_lif_phc_ktime(struct ionic_lif *lif, u64 counter);
@@ -348,6 +351,8 @@ void ionic_lif_unregister_phc(struct ionic_lif *lif);
 void ionic_lif_alloc_phc(struct ionic_lif *lif);
 void ionic_lif_free_phc(struct ionic_lif *lif);
 #else
+static inline void ionic_lif_hwstamp_replay(struct ionic_lif *lif) {}
+
 static inline int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
 {
 	return -EOPNOTSUPP;
@@ -421,8 +426,7 @@ static inline void debug_stats_napi_poll(struct ionic_qcq *qcq,
 #ifdef IONIC_DEBUG_STATS
 #define DEBUG_STATS_CQE_CNT(cq)		((cq)->compl_count++)
 #define DEBUG_STATS_RX_BUFF_CNT(q)	((q)->lif->rxqstats[q->index].buffers_posted++)
-#define DEBUG_STATS_TXQ_POST(q, dbell) \
-	debug_stats_txq_post(q, dbell)
+#define DEBUG_STATS_TXQ_POST(q, dbell)  debug_stats_txq_post(q, dbell)
 #define DEBUG_STATS_NAPI_POLL(qcq, work_done) \
 	debug_stats_napi_poll(qcq, work_done)
 #else

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -61,60 +61,72 @@ static u64 ionic_hwstamp_rx_filt(int config_rx_filter)
 		return IONIC_PKT_CLS_PTP2_SYNC;
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
 		return IONIC_PKT_CLS_PTP2_SYNC | IONIC_PKT_CLS_PTP2_DREQ;
-
+#ifdef HAVE_HWTSTAMP_FILTER_NTP_ALL
 	case HWTSTAMP_FILTER_NTP_ALL:
 		return IONIC_PKT_CLS_NTP_ALL;
-
+#endif
 	default:
 		return 0;
 	}
 }
 
-int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
+static int ionic_lif_hwstamp_set_ts_config(struct ionic_lif *lif,
+					   struct hwtstamp_config *new_ts)
 {
 	struct ionic *ionic = lif->ionic;
-	struct hwtstamp_config config;
+	struct hwtstamp_config *config;
+	struct hwtstamp_config ts;
 	int tx_mode = 0;
 	u64 rx_filt = 0;
+	int err, err2;
 	bool rx_all;
 	__le64 mask;
-	int err, err2;
 
 	if (!lif->phc || !lif->phc->ptp)
 		return -EOPNOTSUPP;
 
-	if (ifr) {
-		if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-			return -EFAULT;
+	mutex_lock(&lif->phc->config_lock);
+
+	if (new_ts) {
+		config = new_ts;
 	} else {
-		/* if called with ifr == NULL, behave as if called with the
-		 * current ts_config from the initial cleared state.
+		/* If called with new_ts == NULL, replay the previous request
+		 * primarily for recovery after a FW_RESET.
+		 * We saved the previous configuration request info, so copy
+		 * the previous request for reference, clear the current state
+		 * to match the device's reset state, and run with it.
 		 */
-		memcpy(&config, &lif->phc->ts_config, sizeof(config));
-		memset(&lif->phc->ts_config, 0, sizeof(config));
+		config = &ts;
+		memcpy(config, &lif->phc->ts_config, sizeof(*config));
+		memset(&lif->phc->ts_config, 0, sizeof(lif->phc->ts_config));
+		lif->phc->ts_config_tx_mode = 0;
+		lif->phc->ts_config_rx_filt = 0;
 	}
 
-	tx_mode = ionic_hwstamp_tx_mode(config.tx_type);
-	if (tx_mode < 0)
-		return tx_mode;
+	tx_mode = ionic_hwstamp_tx_mode(config->tx_type);
+	if (tx_mode < 0) {
+		err = tx_mode;
+		goto err_queues;
+	}
 
 	mask = cpu_to_le64(BIT_ULL(tx_mode));
-	if ((ionic->ident.lif.eth.hwstamp_tx_modes & mask) != mask)
-		return -ERANGE;
+	if ((ionic->ident.lif.eth.hwstamp_tx_modes & mask) != mask) {
+		err = -ERANGE;
+		goto err_queues;
+	}
 
-	rx_filt = ionic_hwstamp_rx_filt(config.rx_filter);
-	rx_all = config.rx_filter != HWTSTAMP_FILTER_NONE && !rx_filt;
+	rx_filt = ionic_hwstamp_rx_filt(config->rx_filter);
+	rx_all = config->rx_filter != HWTSTAMP_FILTER_NONE && !rx_filt;
 
 	mask = cpu_to_le64(rx_filt);
 	if ((ionic->ident.lif.eth.hwstamp_rx_filters & mask) != mask) {
 		rx_filt = 0;
 		rx_all = true;
-		config.rx_filter = HWTSTAMP_FILTER_ALL;
+		config->rx_filter = HWTSTAMP_FILTER_ALL;
 	}
 
-	pr_info("%s:%d: config_rx_filter %d rx_filt %#llx rx_all %d\n", __func__, __LINE__, config.rx_filter, rx_filt, rx_all);
-
-	mutex_lock(&lif->phc->config_lock);
+	dev_dbg(ionic->dev, "%s: config_rx_filter %d rx_filt %#llx rx_all %d\n",
+		__func__, config->rx_filter, rx_filt, rx_all);
 
 	if (tx_mode) {
 		err = ionic_lif_create_hwstamp_txq(lif);
@@ -146,15 +158,7 @@ int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
 			goto err_rxall;
 	}
 
-	if (ifr) {
-		err = copy_to_user(ifr->ifr_data, &config, sizeof(config));
-		if (err) {
-			err = -EFAULT;
-			goto err_final;
-		}
-	}
-
-	memcpy(&lif->phc->ts_config, &config, sizeof(config));
+	memcpy(&lif->phc->ts_config, config, sizeof(*config));
 	lif->phc->ts_config_rx_filt = rx_filt;
 	lif->phc->ts_config_tx_mode = tx_mode;
 
@@ -162,32 +166,59 @@ int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
 
 	return 0;
 
-err_final:
-	if (rx_all != (lif->phc->ts_config.rx_filter == HWTSTAMP_FILTER_ALL)) {
-		rx_all = lif->phc->ts_config.rx_filter == HWTSTAMP_FILTER_ALL;
-		err2 = ionic_lif_config_hwstamp_rxq_all(lif, rx_all);
-		if (err2)
-			dev_err(ionic->dev, "Failed to revert all-rxq timestamp config: %d\n", err2);
-	}
 err_rxall:
 	if (rx_filt != lif->phc->ts_config_rx_filt) {
 		rx_filt = lif->phc->ts_config_rx_filt;
 		err2 = ionic_lif_set_hwstamp_rxfilt(lif, rx_filt);
 		if (err2)
-			dev_err(ionic->dev, "Failed to revert rx timestamp filter: %d\n", err2);
+			dev_err(ionic->dev,
+				"Failed to revert rx timestamp filter: %d\n", err2);
 	}
 err_rxfilt:
 	if (tx_mode != lif->phc->ts_config_tx_mode) {
 		tx_mode = lif->phc->ts_config_tx_mode;
 		err2 = ionic_lif_set_hwstamp_txmode(lif, tx_mode);
 		if (err2)
-			dev_err(ionic->dev, "Failed to revert tx timestamp mode: %d\n", err2);
+			dev_err(ionic->dev,
+				"Failed to revert tx timestamp mode: %d\n", err2);
 	}
 err_txmode:
 	/* special queues remain allocated, just unused */
 err_queues:
 	mutex_unlock(&lif->phc->config_lock);
 	return err;
+}
+
+int ionic_lif_hwstamp_set(struct ionic_lif *lif, struct ifreq *ifr)
+{
+	struct hwtstamp_config config;
+	int err;
+
+	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+		return -EFAULT;
+
+	err = ionic_lif_hwstamp_set_ts_config(lif, &config);
+	if (err) {
+		netdev_info(lif->netdev, "hwstamp set failed: %d\n", err);
+		return err;
+	}
+
+	if (copy_to_user(ifr->ifr_data, &config, sizeof(config)))
+		return -EFAULT;
+
+	return 0;
+}
+
+void ionic_lif_hwstamp_replay(struct ionic_lif *lif)
+{
+	int err;
+
+	if (!lif->phc || !lif->phc->ptp)
+		return;
+
+	err = ionic_lif_hwstamp_set_ts_config(lif, NULL);
+	if (err)
+		netdev_info(lif->netdev, "hwstamp replay failed: %d\n", err);
 }
 
 int ionic_lif_hwstamp_get(struct ionic_lif *lif, struct ifreq *ifr)
@@ -201,7 +232,9 @@ int ionic_lif_hwstamp_get(struct ionic_lif *lif, struct ifreq *ifr)
 	memcpy(&config, &lif->phc->ts_config, sizeof(config));
 	mutex_unlock(&lif->phc->config_lock);
 
-	return copy_to_user(ifr->ifr_data, &config, sizeof(config));
+	if (copy_to_user(ifr->ifr_data, &config, sizeof(config)))
+		return -EFAULT;
+	return 0;
 }
 
 #ifdef HAVE_PHC_GETTIMEX64
@@ -272,6 +305,7 @@ static int ionic_setphc_cmd(struct ionic_phc *phc, struct ionic_admin_ctx *ctx)
 	return ionic_adminq_post(phc->lif, ctx);
 }
 
+#ifdef HAVE_PTP_ADJFINE
 static int ionic_phc_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 {
 	struct ionic_phc *phc = container_of(info, struct ionic_phc, ptp_info);
@@ -308,6 +342,7 @@ static int ionic_phc_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 
 	return ionic_adminq_wait(phc->lif, &ctx, err);
 }
+#endif
 
 static int ionic_phc_adjtime(struct ptp_clock_info *info, s64 delta)
 {
@@ -431,13 +466,24 @@ static long ionic_phc_aux_work(struct ptp_clock_info *info)
 	return phc->aux_work_delay;
 }
 
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+void ionic_phc_aux_work_helper(struct work_struct *work)
+{
+	struct ionic_phc *phc = container_of(work, struct ionic_phc, dwork.work);
+	long delay;
+
+	delay = ionic_phc_aux_work(&phc->ptp_info);
+	schedule_delayed_work(&phc->dwork, delay);
+}
+#endif
+
 ktime_t ionic_lif_phc_ktime(struct ionic_lif *lif, u64 tick)
 {
 	unsigned long irqflags;
 	u64 ns;
 
 	if (!lif->phc)
-		return 0;
+		return ktime_set(0, 0);
 
 	spin_lock_irqsave(&lif->phc->lock, irqflags);
 	ns = timecounter_cyc2time(&lif->phc->tc, tick);
@@ -449,7 +495,9 @@ ktime_t ionic_lif_phc_ktime(struct ionic_lif *lif, u64 tick)
 static const struct ptp_clock_info ionic_ptp_info = {
 	.owner		= THIS_MODULE,
 	.name		= "ionic_ptp",
+#ifdef HAVE_PTP_ADJFINE
 	.adjfine	= ionic_phc_adjfine,
+#endif
 	.adjtime	= ionic_phc_adjtime,
 #ifdef HAVE_PHC_GETTIMEX64
 	.gettimex64	= ionic_phc_gettimex64,
@@ -457,7 +505,9 @@ static const struct ptp_clock_info ionic_ptp_info = {
 	.gettime64	= ionic_phc_gettime64,
 #endif
 	.settime64	= ionic_phc_settime64,
+#ifdef HAVE_PTP_CLOCK_DO_AUX_WORK
 	.do_aux_work	= ionic_phc_aux_work,
+#endif
 };
 
 void ionic_lif_register_phc(struct ionic_lif *lif)
@@ -475,7 +525,11 @@ void ionic_lif_register_phc(struct ionic_lif *lif)
 	}
 
 	if (lif->phc->ptp)
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+		schedule_delayed_work(&lif->phc->dwork, lif->phc->aux_work_delay);
+#else
 		ptp_schedule_worker(lif->phc->ptp, lif->phc->aux_work_delay);
+#endif
 }
 
 void ionic_lif_unregister_phc(struct ionic_lif *lif)
@@ -483,6 +537,9 @@ void ionic_lif_unregister_phc(struct ionic_lif *lif)
 	if (!lif->phc || !lif->phc->ptp)
 		return;
 
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+	cancel_delayed_work_sync(&lif->phc->dwork);
+#endif
 	ptp_clock_unregister(lif->phc->ptp);
 
 	lif->phc->ptp = NULL;
@@ -510,6 +567,9 @@ void ionic_lif_alloc_phc(struct ionic_lif *lif)
 
 	phc->lif = lif;
 
+#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+	INIT_DELAYED_WORK(&phc->dwork, ionic_phc_aux_work_helper);
+#endif
 	phc->cc.read = ionic_cc_read;
 	phc->cc.mask = le64_to_cpu(ionic->ident.dev.hwstamp_mask);
 	phc->cc.mult = le32_to_cpu(ionic->ident.dev.hwstamp_mult);

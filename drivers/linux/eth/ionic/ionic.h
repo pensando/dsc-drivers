@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #ifndef _IONIC_H_
 #define _IONIC_H_
@@ -56,10 +56,10 @@ struct ionic {
 	struct dentry *dentry;
 	struct ionic_dev_bar bars[IONIC_BARS_MAX];
 	unsigned int num_bars;
+	struct ionic_identity ident;
 	bool is_mgmt_nic;
 	struct ionic_lif *lif;
 	struct ionic_eq **eqs;
-	struct ionic_identity ident;
 	unsigned int nnqs_per_lif;
 	unsigned int nrdma_eqs_per_lif;
 	unsigned int ntxqs_per_lif;
@@ -81,7 +81,6 @@ struct ionic {
 	struct rw_semaphore vf_op_lock;	/* lock for VF operations */
 	struct ionic_vf *vfs;
 	int num_vfs;
-
 	struct timer_list watchdog_timer;
 	int watchdog_period;
 };

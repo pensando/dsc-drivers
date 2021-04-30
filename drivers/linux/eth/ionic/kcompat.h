@@ -5983,6 +5983,9 @@ static inline void __page_frag_cache_drain(struct page *page,
 #ifndef ETH_MIN_MTU
 #define ETH_MIN_MTU 68
 #endif /* ETH_MIN_MTU */
+#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,4))
+#define HAVE_PTP_ADJFINE
+#endif
 #else /* >= 4.10 */
 #define HAVE_TC_FLOWER_ENC
 #define HAVE_NETDEVICE_MIN_MAX_MTU
@@ -5992,6 +5995,7 @@ static inline void __page_frag_cache_drain(struct page *page,
 #define HAVE_DEV_WALK_API
 #define HAVE_ETHTOOL_NEW_2500MB_BITS
 #define HAVE_ETHTOOL_5G_BITS
+#define HAVE_PTP_ADJFINE
 /* kernel 4.10 onwards, as part of busy_poll rewrite, new state were added
  * which is part of NAPI:state. If NAPI:state=NAPI_STATE_IN_BUSY_POLL,
  * it means napi_poll is invoked in busy_poll context
@@ -6748,12 +6752,20 @@ static inline void devlink_flash_update_begin_notify(struct devlink *dl) { }
 static inline void devlink_flash_update_end_notify(struct devlink *dl) { }
 #endif /* 5.11.0 */
 
-/* we will not support PTP for kernels without HAVE_PTP_CLOCK_DO_AUX_WORK */
-#ifndef HAVE_PTP_CLOCK_DO_AUX_WORK
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0))
+
+void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...);
+#define ethtool_sprintf _kc_ethtool_sprintf
+#endif /* 5.12.0 */
+
+/* We don't support PTP on older RHEL kernels (needs more compat work) */
+#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))
 #undef CONFIG_PTP_1588_CLOCK
 #undef CONFIG_PTP_1588_CLOCK_MODULE
 #endif
-/* and not on suse kernels (needs more compat work) */
+
+/* We don't support PTP on SUSE kernels (needs more compat work) */
 #ifdef CONFIG_SUSE_KERNEL
 #undef CONFIG_PTP_1588_CLOCK
 #undef CONFIG_PTP_1588_CLOCK_MODULE

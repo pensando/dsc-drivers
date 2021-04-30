@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -359,18 +359,6 @@ void ionic_dev_cmd_port_speed(struct ionic_dev *idev, u32 speed)
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
-void ionic_dev_cmd_port_mtu(struct ionic_dev *idev, u32 mtu)
-{
-	union ionic_dev_cmd cmd = {
-		.port_setattr.opcode = IONIC_CMD_PORT_SETATTR,
-		.port_setattr.index = 0,
-		.port_setattr.attr = IONIC_PORT_ATTR_MTU,
-		.port_setattr.mtu = cpu_to_le32(mtu),
-	};
-
-	ionic_dev_cmd_go(idev, &cmd);
-}
-
 void ionic_dev_cmd_port_autoneg(struct ionic_dev *idev, u8 an_enable)
 {
 	union ionic_dev_cmd cmd = {
@@ -402,18 +390,6 @@ void ionic_dev_cmd_port_pause(struct ionic_dev *idev, u8 pause_type)
 		.port_setattr.index = 0,
 		.port_setattr.attr = IONIC_PORT_ATTR_PAUSE,
 		.port_setattr.pause_type = pause_type,
-	};
-
-	ionic_dev_cmd_go(idev, &cmd);
-}
-
-void ionic_dev_cmd_port_loopback(struct ionic_dev *idev, u8 loopback_mode)
-{
-	union ionic_dev_cmd cmd = {
-		.port_setattr.opcode = IONIC_CMD_PORT_SETATTR,
-		.port_setattr.index = 0,
-		.port_setattr.attr = IONIC_PORT_ATTR_LOOPBACK,
-		.port_setattr.loopback_mode = loopback_mode,
 	};
 
 	ionic_dev_cmd_go(idev, &cmd);
@@ -549,16 +525,6 @@ void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 	};
 
 	ionic_dev_cmd_go(idev, &cmd);
-}
-
-char *ionic_dev_asic_name(u8 asic_type)
-{
-	switch (asic_type) {
-	case IONIC_ASIC_TYPE_CAPRI:
-		return "Capri";
-	default:
-		return "Unknown";
-	}
 }
 
 int ionic_db_page_num(struct ionic_lif *lif, int pid)
@@ -1044,8 +1010,10 @@ void ionic_q_post(struct ionic_queue *q, bool ring_doorbell, ionic_desc_cb cb,
 
 	q->head_idx = (q->head_idx + 1) & (q->num_descs - 1);
 
+#ifdef IONIC_DEBUG_STATS
 	q->depth = q->num_descs - ionic_q_space_avail(q);
 	q->depth_max = max_t(u64, q->depth, q->depth_max);
+#endif
 
 	dev_dbg(dev, "%s: lif=%d qname=%s hw_type=%d hw_index=%d p_index=%d ringdb=%d\n",
 		__func__, q->lif->index, q->name, q->hw_type, q->hw_index,
