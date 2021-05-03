@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB OR BSD-2-Clause */
-/* Copyright (c) 2018-2019 Pensando Systems, Inc.  All rights reserved. */
+/* SPDX-License-Identifier: (GPL-2.0 OR Linux-OpenIB) OR BSD-2-Clause */
+/* Copyright (c) 2018 - 2021 Pensando Systems, Inc.  All rights reserved. */
 
 #ifndef IONIC_REGS_H
 #define IONIC_REGS_H

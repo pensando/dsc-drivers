@@ -101,3 +101,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - bug fixes for PTP support and error handling
  - clean up mnet code to upstream code format standards
  - updates for compiling under v5.10
+
+2021-04-30 - driver updates to 1.15.7-C-3
+ - Copyright updates
+ - Minor code cleanups to better match upstream drivers
+ - Renamed mnet to mdev to be more generic
+ - Added support in mdev for future mcrypt devices

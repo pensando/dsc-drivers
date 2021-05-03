@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #ifndef _IONIC_DEV_H_
 #define _IONIC_DEV_H_
@@ -220,7 +220,6 @@ struct ionic_desc_info {
 struct ionic_queue {
 	struct device *dev;
 	struct ionic_lif *lif;
-	struct ionic_dev *idev;
 	struct ionic_desc_info *info;
 	u64 dbval;
 	u16 head_idx;
@@ -232,9 +231,12 @@ struct ionic_queue {
 	u64 stop;
 	u64 wake;
 	u64 drop;
+#ifdef IONIC_DEBUG_STATS
 	u64 depth;
 	u64 depth_max;
+#endif
 	u64 features;
+	struct ionic_dev *idev;
 	unsigned int type;
 	unsigned int hw_index;
 	unsigned int hw_type;
@@ -350,11 +352,9 @@ void ionic_dev_cmd_port_init(struct ionic_dev *idev);
 void ionic_dev_cmd_port_reset(struct ionic_dev *idev);
 void ionic_dev_cmd_port_state(struct ionic_dev *idev, u8 state);
 void ionic_dev_cmd_port_speed(struct ionic_dev *idev, u32 speed);
-void ionic_dev_cmd_port_mtu(struct ionic_dev *idev, u32 mtu);
 void ionic_dev_cmd_port_autoneg(struct ionic_dev *idev, u8 an_enable);
 void ionic_dev_cmd_port_fec(struct ionic_dev *idev, u8 fec_type);
 void ionic_dev_cmd_port_pause(struct ionic_dev *idev, u8 pause_type);
-void ionic_dev_cmd_port_loopback(struct ionic_dev *idev, u8 loopback_mode);
 
 int ionic_set_vf_config(struct ionic *ionic, int vf, u8 attr, u8 *data);
 void ionic_dev_cmd_queue_identify(struct ionic_dev *idev,
@@ -366,7 +366,6 @@ void ionic_dev_cmd_lif_reset(struct ionic_dev *idev, u16 lif_index);
 void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 			       u16 lif_index, u16 intr_index);
 
-char *ionic_dev_asic_name(u8 asic_type);
 int ionic_db_page_num(struct ionic_lif *lif, int pid);
 
 int ionic_eqs_alloc(struct ionic *ionic);

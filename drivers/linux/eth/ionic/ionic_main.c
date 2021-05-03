@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #include <linux/module.h>
 #include <linux/version.h>
@@ -263,17 +263,15 @@ static void ionic_adminq_cb(struct ionic_queue *q,
 {
 	struct ionic_admin_ctx *ctx = cb_arg;
 	struct ionic_admin_comp *comp;
-	struct device *dev;
 
 	if (!ctx)
 		return;
 
 	comp = cq_info->cq_desc;
-	dev = q->dev;
 
 	memcpy(&ctx->comp, comp, sizeof(*comp));
 
-	dev_dbg(dev, "comp admin queue command:\n");
+	dev_dbg(q->dev, "comp admin queue command:\n");
 	dynamic_hex_dump("comp ", DUMP_PREFIX_OFFSET, 16, 1,
 			 &ctx->comp, sizeof(ctx->comp), true);
 
@@ -495,6 +493,8 @@ int ionic_identify(struct ionic *ionic)
 	}
 	mutex_unlock(&ionic->dev_cmd_lock);
 
+	dev_info(ionic->dev, "FW: %s\n", idev->dev_info.fw_version);
+
 	if (err) {
 		dev_err(ionic->dev, "Cannot identify ionic: %dn", err);
 		goto err_out;
@@ -583,10 +583,8 @@ int ionic_port_init(struct ionic *ionic)
 						     idev->port_info_sz,
 						     &idev->port_info_pa,
 						     GFP_KERNEL);
-		if (!idev->port_info) {
-			dev_err(ionic->dev, "Failed to allocate port info\n");
+		if (!idev->port_info)
 			return -ENOMEM;
-		}
 	}
 
 	sz = min(sizeof(ident->port.config), sizeof(idev->dev_cmd_regs->data));

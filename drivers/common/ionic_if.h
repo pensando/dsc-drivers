@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: (GPL-2.0 OR Linux-OpenIB) OR BSD-2-Clause */
-/* Copyright (c) 2017-2020 Pensando Systems, Inc.  All rights reserved. */
+/* Copyright (c) 2017 - 2021 Pensando Systems, Inc.  All rights reserved. */
 
 #ifndef _IONIC_IF_H_
 #define _IONIC_IF_H_
@@ -1231,9 +1231,6 @@ enum ionic_xcvr_pid {
 	IONIC_XCVR_PID_SFP_25GBASE_CR_S  = 3,
 	IONIC_XCVR_PID_SFP_25GBASE_CR_L  = 4,
 	IONIC_XCVR_PID_SFP_25GBASE_CR_N  = 5,
-	IONIC_XCVR_PID_QSFP_50G_CR2_FC   = 6,
-	IONIC_XCVR_PID_QSFP_50G_CR2      = 7,
-	IONIC_XCVR_PID_QSFP_200G_CR4     = 8,
 
 	/* Fiber */
 	IONIC_XCVR_PID_QSFP_100G_AOC    = 50,
@@ -1766,7 +1763,7 @@ struct ionic_lif_setattr_cmd {
 			__le64 addr;
 		} rss;
 		u8      stats_ctl;
-		__le16 txstamp_mode;
+		__le16  txstamp_mode;
 		u8      rsvd[60];
 	} __attribute__((packed));
 };

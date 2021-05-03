@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2017 - 2019 Pensando Systems, Inc */
+/* Copyright(c) 2017 - 2021 Pensando Systems, Inc */
 
 #include <linux/netdevice.h>
 
@@ -447,6 +447,16 @@ static int lif_identity_show(struct seq_file *seq, void *v)
 }
 DEFINE_SHOW_ATTRIBUTE(lif_identity);
 
+static int lif_state_show(struct seq_file *seq, void *v)
+{
+	struct ionic_lif *lif = seq->private;
+
+	seq_printf(seq, "0x%08lx\n", lif->state[0]);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(lif_state);
+
 void ionic_debugfs_add_lif(struct ionic_lif *lif)
 {
 	struct dentry *netdev_dentry;
@@ -464,6 +474,8 @@ void ionic_debugfs_add_lif(struct ionic_lif *lif)
 
 	debugfs_create_file("identity", 0400, lif->dentry,
 			    lif->identity, &lif_identity_fops);
+	debugfs_create_file("state", 0400, lif->dentry,
+			    lif, &lif_state_fops);
 }
 
 void ionic_debugfs_del_lif(struct ionic_lif *lif)
