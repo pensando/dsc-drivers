@@ -368,6 +368,9 @@ void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 
 int ionic_db_page_num(struct ionic_lif *lif, int pid);
 
+int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int order);
+void ionic_put_cmb(struct ionic_lif *lif, u32 pgid, int order);
+
 int ionic_eqs_alloc(struct ionic *ionic);
 void ionic_eqs_free(struct ionic *ionic);
 void ionic_eqs_deinit(struct ionic *ionic);

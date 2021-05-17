@@ -181,32 +181,16 @@ EXPORT_SYMBOL_GPL(ionic_api_put_intr);
 int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order)
 {
 	struct ionic_lif *lif = handle;
-	struct ionic_dev *idev = &lif->ionic->idev;
-	int ret;
 
-	mutex_lock(&idev->cmb_inuse_lock);
-	ret = bitmap_find_free_region(idev->cmb_inuse, idev->cmb_npages,
-				      order);
-	mutex_unlock(&idev->cmb_inuse_lock);
-
-	if (ret < 0)
-		return ret;
-
-	*pgid = (u32)ret;
-	*pgaddr = idev->phy_cmb_pages + ret * PAGE_SIZE;
-
-	return 0;
+	return ionic_get_cmb(lif, pgid, pgaddr, order);
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_cmb);
 
 void ionic_api_put_cmb(void *handle, u32 pgid, int order)
 {
 	struct ionic_lif *lif = handle;
-	struct ionic_dev *idev = &lif->ionic->idev;
 
-	mutex_lock(&idev->cmb_inuse_lock);
-	bitmap_release_region(idev->cmb_inuse, pgid, order);
-	mutex_unlock(&idev->cmb_inuse_lock);
+	ionic_put_cmb(lif, pgid, order);
 }
 EXPORT_SYMBOL_GPL(ionic_api_put_cmb);
 

@@ -122,7 +122,7 @@ int ionic_dev_setup(struct ionic *ionic)
 	/* BAR2: optional controller memory mapping */
 	bar++;
 	mutex_init(&idev->cmb_inuse_lock);
-	if (num_bars < 3) {
+	if (num_bars < 3 || !ionic->bars[IONIC_PCI_BAR_CMB].len) {
 		idev->cmb_inuse = NULL;
 		idev->phy_cmb_pages = 0;
 		idev->cmb_npages = 0;
@@ -530,6 +530,33 @@ void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 int ionic_db_page_num(struct ionic_lif *lif, int pid)
 {
 	return (lif->hw_index * lif->dbid_count) + pid;
+}
+
+int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int order)
+{
+	struct ionic_dev *idev = &lif->ionic->idev;
+	int ret;
+
+	mutex_lock(&idev->cmb_inuse_lock);
+	ret = bitmap_find_free_region(idev->cmb_inuse, idev->cmb_npages, order);
+	mutex_unlock(&idev->cmb_inuse_lock);
+
+	if (ret < 0)
+		return ret;
+
+	*pgid = (u32)ret;
+	*pgaddr = idev->phy_cmb_pages + ret * PAGE_SIZE;
+
+	return 0;
+}
+
+void ionic_put_cmb(struct ionic_lif *lif, u32 pgid, int order)
+{
+	struct ionic_dev *idev = &lif->ionic->idev;
+
+	mutex_lock(&idev->cmb_inuse_lock);
+	bitmap_release_region(idev->cmb_inuse, pgid, order);
+	mutex_unlock(&idev->cmb_inuse_lock);
 }
 
 static void ionic_txrx_notify(struct ionic *ionic,

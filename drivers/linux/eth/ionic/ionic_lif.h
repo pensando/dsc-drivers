@@ -69,6 +69,7 @@ struct ionic_rx_stats {
 #define IONIC_QCQ_F_TX_STATS		BIT(3)
 #define IONIC_QCQ_F_RX_STATS		BIT(4)
 #define IONIC_QCQ_F_NOTIFYQ		BIT(5)
+#define IONIC_QCQ_F_CMB_RINGS		BIT(6)
 
 struct ionic_napi_stats {
 	u64 poll_count;
@@ -76,15 +77,20 @@ struct ionic_napi_stats {
 };
 
 struct ionic_qcq {
-	void *q_base;
+	union {
+		void *q_base;
+		void __iomem *cmb_q_base;
+	};
 	dma_addr_t q_base_pa;	/* might not be page aligned */
 	u32 q_size;
+	u32 cq_size;
 	void *cq_base;
 	dma_addr_t cq_base_pa;	/* might not be page aligned */
-	u32 cq_size;
 	void *sg_base;
 	dma_addr_t sg_base_pa;	/* might not be page aligned */
 	u32 sg_size;
+	u32 cmb_pgid;
+	u32 cmb_order;
 	bool armed;
 	struct dim dim;
 	struct ionic_queue q;
@@ -114,7 +120,6 @@ struct ionic_deferred_work {
 	struct list_head list;
 	enum ionic_deferred_work_type type;
 	union {
-		unsigned int rx_mode;
 		u8 addr[ETH_ALEN];
 		u8 fw_status;
 	};
@@ -160,6 +165,7 @@ enum ionic_lif_state_flags {
 	IONIC_LIF_F_BROKEN,
 	IONIC_LIF_F_TX_DIM_INTR,
 	IONIC_LIF_F_RX_DIM_INTR,
+	IONIC_LIF_F_CMB_RINGS,
 
 	/* leave this as last */
 	IONIC_LIF_F_STATE_SIZE
@@ -191,60 +197,69 @@ struct ionic_lif {
 	struct net_device *netdev;
 	DECLARE_BITMAP(state, IONIC_LIF_F_STATE_SIZE);
 	struct ionic *ionic;
-	unsigned int index;
-	unsigned int hw_index;
-	struct mutex queue_lock;	/* lock for queue structures */
-	spinlock_t adminq_lock;		/* lock for AdminQ operations */
-	struct ionic_qcq *adminqcq;
-	struct ionic_qcq *notifyqcq;
+	u64 __iomem *kern_dbpage;
+	u32 rx_copybreak;
+	unsigned int nxqs;
+
 	struct ionic_qcq **txqcqs;
-	struct ionic_qcq *hwstamp_txq;
 	struct ionic_tx_stats *txqstats;
 	struct ionic_qcq **rxqcqs;
-	struct ionic_qcq *hwstamp_rxq;
 	struct ionic_rx_stats *rxqstats;
-	struct ionic_deferred deferred;
-	struct work_struct tx_timeout_work;
-	u64 last_eid;
+	struct ionic_qcq *hwstamp_txq;
+	struct ionic_qcq *hwstamp_rxq;
+
+	struct ionic_qcq *adminqcq;
+	struct ionic_qcq *notifyqcq;
+	struct mutex queue_lock;	/* lock for queue structures */
+	struct mutex config_lock;	/* lock for config actions */
+	spinlock_t adminq_lock;		/* lock for AdminQ operations */
 	unsigned int kern_pid;
-	u64 __iomem *kern_dbpage;
+
+	struct work_struct tx_timeout_work;
+	struct ionic_deferred deferred;
+
+	u64 last_eid;
 	unsigned int nrdma_eqs;
 	unsigned int nrdma_eqs_avail;
-	unsigned int nxqs;
 	unsigned int ntxq_descs;
 	unsigned int nrxq_descs;
-	u32 rx_copybreak;
 	u64 rxq_features;
-	unsigned int rx_mode;
-	u64 hw_features;
+	u16 rx_mode;
+	u16 rx_mode_request;
 	bool registered;
 	bool mc_overflow;
 	bool uc_overflow;
+	u64 hw_features;
+	unsigned int index;
+	unsigned int hw_index;
+
+	u8 rss_hash_key[IONIC_RSS_HASH_KEY_SIZE];
+	u8 *rss_ind_tbl;
+	dma_addr_t rss_ind_tbl_pa;
+	u32 rss_ind_tbl_sz;
+	u16 rss_types;
+
 	u16 lif_type;
 	unsigned int nmcast;
 	unsigned int nucast;
 	char name[IONIC_LIF_NAME_MAX_SZ];
 
-	union ionic_lif_identity *identity;
 	struct ionic_lif_info *info;
 	dma_addr_t info_pa;
 	u32 info_sz;
-	struct ionic_qtype_info qtype_info[IONIC_QTYPE_MAX];
 
-	u16 rss_types;
-	u8 rss_hash_key[IONIC_RSS_HASH_KEY_SIZE];
-	u8 *rss_ind_tbl;
-	dma_addr_t rss_ind_tbl_pa;
-	u32 rss_ind_tbl_sz;
+	unsigned int dbid_count;
+	struct mutex dbid_inuse_lock;	/* lock the dbid bit list */
+	unsigned long *dbid_inuse;
+
+	union ionic_lif_identity *identity;
+	struct ionic_qtype_info qtype_info[IONIC_QTYPE_MAX];
 
 	struct ionic_rx_filters rx_filters;
 	u32 rx_coalesce_usecs;		/* what the user asked for */
 	u32 rx_coalesce_hw;		/* what the hw is using */
 	u32 tx_coalesce_usecs;		/* what the user asked for */
 	u32 tx_coalesce_hw;		/* what the hw is using */
-	struct mutex dbid_inuse_lock;	/* lock the dbid bit list */
-	unsigned long *dbid_inuse;
-	unsigned int dbid_count;
 
 	struct ionic_phc *phc;
 
@@ -281,7 +296,7 @@ struct ionic_queue_params {
 	unsigned int nxqs;
 	unsigned int ntxq_descs;
 	unsigned int nrxq_descs;
-	unsigned int intr_split;
+	bool intr_split;
 	u64 rxq_features;
 };
 

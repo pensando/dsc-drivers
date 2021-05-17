@@ -41,10 +41,10 @@ static int bars_show(struct seq_file *seq, void *v)
 	unsigned int i;
 
 	for (i = 0; i < IONIC_BARS_MAX; i++)
-		if (bars[i].vaddr)
-			seq_printf(seq, "BAR%d: len 0x%lx vaddr %pK bus_addr %pad\n",
-				   i, bars[i].len, bars[i].vaddr,
-				   &bars[i].bus_addr);
+		if (bars[i].len)
+			seq_printf(seq, "BAR%d: res %d len 0x%08lx vaddr %pK bus_addr 0x%016llx\n",
+				   i, bars[i].res_index, bars[i].len,
+				   bars[i].vaddr, bars[i].bus_addr);
 
 	return 0;
 }
@@ -229,6 +229,8 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 	debugfs_create_x32("cq_size", 0400, qcq_dentry, &qcq->cq_size);
 	debugfs_create_x64("sg_base_pa", 0400, qcq_dentry, &qcq->sg_base_pa);
 	debugfs_create_x32("sg_size", 0400, qcq_dentry, &qcq->sg_size);
+	debugfs_create_x32("cmb_order", 0400, qcq_dentry, &qcq->cmb_order);
+	debugfs_create_x32("cmb_pgid", 0400, qcq_dentry, &qcq->cmb_pgid);
 
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)))
 	debugfs_create_u8("armed", 0400, qcq_dentry, (u8 *)&qcq->armed);

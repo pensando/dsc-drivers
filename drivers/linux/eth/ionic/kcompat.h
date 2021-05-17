@@ -6753,11 +6753,11 @@ static inline void devlink_flash_update_end_notify(struct devlink *dl) { }
 #endif /* 5.11.0 */
 
 /*****************************************************************************/
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,13,0))
 
 void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...);
 #define ethtool_sprintf _kc_ethtool_sprintf
-#endif /* 5.12.0 */
+#endif /* 5.13.0 */
 
 /* We don't support PTP on older RHEL kernels (needs more compat work) */
 #if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))
