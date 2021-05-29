@@ -389,7 +389,7 @@ void ionic_rx_fill(struct ionic_queue *q)
 	struct ionic_rxq_sg_desc *sg_desc;
 	struct ionic_rxq_sg_elem *sg_elem;
 	struct ionic_buf_info *buf_info;
-	struct ionic_rxq_desc *desc;
+	struct ionic_rxq_desc tmp_desc;
 	unsigned int remain_len;
 	unsigned int align_len;
 	unsigned int frag_len;
@@ -407,13 +407,13 @@ void ionic_rx_fill(struct ionic_queue *q)
 		nfrags = 0;
 		remain_len = len;
 		desc_info = &q->info[q->head_idx];
-		desc = desc_info->desc;
+		memset(&tmp_desc, 0, sizeof(tmp_desc));
 		buf_info = &desc_info->bufs[0];
 
 		if (!buf_info->page) { /* alloc a new buffer? */
 			if (unlikely(ionic_rx_page_alloc(q, buf_info))) {
-				desc->addr = 0;
-				desc->len = 0;
+				tmp_desc.addr = 0;
+				tmp_desc.len = 0;
 				return;
 			}
 #if (IONIC_PAGE_ORDER > 0)
@@ -424,9 +424,9 @@ void ionic_rx_fill(struct ionic_queue *q)
 		}
 
 		/* fill main descriptor - buf[0] */
-		desc->addr = cpu_to_le64(buf_info->dma_addr + buf_info->page_offset);
+		tmp_desc.addr = cpu_to_le64(buf_info->dma_addr + buf_info->page_offset);
 		frag_len = min_t(u16, len, IONIC_PAGE_SIZE - buf_info->page_offset);
-		desc->len = cpu_to_le16(frag_len);
+		tmp_desc.len = cpu_to_le16(frag_len);
 		remain_len -= frag_len;
 		buf_info++;
 		nfrags++;
@@ -463,9 +463,16 @@ void ionic_rx_fill(struct ionic_queue *q)
 			memset(sg_elem, 0, sizeof(*sg_elem));
 		}
 
-		desc->opcode = (nfrags > 1) ? IONIC_RXQ_DESC_OPCODE_SG :
-					      IONIC_RXQ_DESC_OPCODE_SIMPLE;
+		tmp_desc.opcode = (nfrags > 1) ? IONIC_RXQ_DESC_OPCODE_SG :
+						 IONIC_RXQ_DESC_OPCODE_SIMPLE;
 		desc_info->nbufs = nfrags;
+
+		/* commit descriptor contents in one shot */
+		if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
+			memcpy_toio((void volatile __iomem *)desc_info->desc,
+				    &tmp_desc, sizeof(tmp_desc));
+		else
+			memcpy(desc_info->desc, &tmp_desc, sizeof(tmp_desc));
 
 		ionic_rxq_post(q, false, ionic_rx_clean, NULL);
 	}
@@ -972,6 +979,7 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 			      u16 vlan_tci, bool has_vlan,
 			      bool start, bool done)
 {
+	struct ionic_txq_desc tmp_desc = {0};
 	u8 flags = 0;
 	u64 cmd;
 
@@ -981,11 +989,18 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 	flags |= done ? IONIC_TXQ_DESC_FLAG_TSO_EOT : 0;
 
 	cmd = encode_txq_desc_cmd(IONIC_TXQ_DESC_OPCODE_TSO, flags, nsge, addr);
-	desc->cmd = cpu_to_le64(cmd);
-	desc->len = cpu_to_le16(len);
-	desc->vlan_tci = cpu_to_le16(vlan_tci);
-	desc->hdr_len = cpu_to_le16(hdrlen);
-	desc->mss = cpu_to_le16(mss);
+	tmp_desc.cmd = cpu_to_le64(cmd);
+	tmp_desc.len = cpu_to_le16(len);
+	tmp_desc.vlan_tci = cpu_to_le16(vlan_tci);
+	tmp_desc.hdr_len = cpu_to_le16(hdrlen);
+	tmp_desc.mss = cpu_to_le16(mss);
+
+	/* commit descriptor contents in one shot */
+	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
+		memcpy_toio((void volatile __iomem *)desc,
+			    &tmp_desc, sizeof(tmp_desc));
+	else
+		memcpy(desc, &tmp_desc, sizeof(tmp_desc));
 
 	if (start) {
 		skb_tx_timestamp(skb);
@@ -1124,11 +1139,11 @@ static int ionic_tx_tso(struct ionic_queue *q, struct sk_buff *skb)
 static int ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 			      struct ionic_desc_info *desc_info)
 {
-	struct ionic_txq_desc *desc = desc_info->txq_desc;
 	struct ionic_buf_info *buf_info = desc_info->bufs;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_tx_stats *stats = q_to_tx_stats(q);
 #endif
+	struct ionic_txq_desc tmp_desc = {0};
 	bool has_vlan;
 	u8 flags = 0;
 	bool encap;
@@ -1143,18 +1158,23 @@ static int ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 	cmd = encode_txq_desc_cmd(IONIC_TXQ_DESC_OPCODE_CSUM_PARTIAL,
 				  flags, skb_shinfo(skb)->nr_frags,
 				  buf_info->dma_addr);
-	desc->cmd = cpu_to_le64(cmd);
-	desc->len = cpu_to_le16(buf_info->len);
+	tmp_desc.cmd = cpu_to_le64(cmd);
+	tmp_desc.len = cpu_to_le16(buf_info->len);
 	if (has_vlan) {
-		desc->vlan_tci = cpu_to_le16(skb_vlan_tag_get(skb));
+		tmp_desc.vlan_tci = cpu_to_le16(skb_vlan_tag_get(skb));
 #ifdef IONIC_DEBUG_STATS
 		stats->vlan_inserted++;
 #endif
-	} else {
-		desc->vlan_tci = 0;
 	}
-	desc->csum_start = cpu_to_le16(skb_checksum_start_offset(skb));
-	desc->csum_offset = cpu_to_le16(skb->csum_offset);
+	tmp_desc.csum_start = cpu_to_le16(skb_checksum_start_offset(skb));
+	tmp_desc.csum_offset = cpu_to_le16(skb->csum_offset);
+
+	/* commit descriptor contents in one shot */
+	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
+		memcpy_toio((void volatile __iomem *)desc_info->desc,
+			    &tmp_desc, sizeof(tmp_desc));
+	else
+		memcpy(desc_info->desc, &tmp_desc, sizeof(tmp_desc));
 
 #ifdef IONIC_DEBUG_STATS
 #ifdef HAVE_CSUM_NOT_INET
@@ -1171,11 +1191,11 @@ static int ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 static int ionic_tx_calc_no_csum(struct ionic_queue *q, struct sk_buff *skb,
 				 struct ionic_desc_info *desc_info)
 {
-	struct ionic_txq_desc *desc = desc_info->txq_desc;
 	struct ionic_buf_info *buf_info = desc_info->bufs;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_tx_stats *stats = q_to_tx_stats(q);
 #endif
+	struct ionic_txq_desc tmp_desc = {0};
 	bool has_vlan;
 	u8 flags = 0;
 	bool encap;
@@ -1190,18 +1210,21 @@ static int ionic_tx_calc_no_csum(struct ionic_queue *q, struct sk_buff *skb,
 	cmd = encode_txq_desc_cmd(IONIC_TXQ_DESC_OPCODE_CSUM_NONE,
 				  flags, skb_shinfo(skb)->nr_frags,
 				  buf_info->dma_addr);
-	desc->cmd = cpu_to_le64(cmd);
-	desc->len = cpu_to_le16(buf_info->len);
+	tmp_desc.cmd = cpu_to_le64(cmd);
+	tmp_desc.len = cpu_to_le16(buf_info->len);
 	if (has_vlan) {
-		desc->vlan_tci = cpu_to_le16(skb_vlan_tag_get(skb));
+		tmp_desc.vlan_tci = cpu_to_le16(skb_vlan_tag_get(skb));
 #ifdef IONIC_DEBUG_STATS
 		stats->vlan_inserted++;
 #endif
-	} else {
-		desc->vlan_tci = 0;
 	}
-	desc->csum_start = 0;
-	desc->csum_offset = 0;
+
+	/* commit descriptor contents in one shot */
+	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
+		memcpy_toio((void volatile __iomem *)desc_info->desc,
+			    &tmp_desc, sizeof(tmp_desc));
+	else
+		memcpy(desc_info->desc, &tmp_desc, sizeof(tmp_desc));
 
 #ifdef IONIC_DEBUG_STATS
 	stats->csum_none++;

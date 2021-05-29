@@ -2595,7 +2595,7 @@ void _kc_pcie_print_link_status(struct pci_dev *dev) {
 #endif /* 4.17.0 */
 
 /*****************************************************************************/
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,13,0))
 void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...)
 {
 	va_list args;
@@ -2606,4 +2606,4 @@ void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...)
 
 	*data += ETH_GSTRING_LEN;
 }
-#endif /* 5.12.0 */
+#endif /* 5.13.0 */

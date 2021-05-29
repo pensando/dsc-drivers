@@ -8,11 +8,17 @@
 #define IONIC_DEV_INFO_VERSION			1
 #define IONIC_IFNAMSIZ				16
 
+#ifdef __CHECKER__
+#define IONIC_CHECK_CMD_LENGTH(X)
+#define IONIC_CHECK_COMP_LENGTH(X)
+#define IONIC_CHECK_CMD_DATA_LENGTH(X)
+#else
 #define IONIC_SIZE_CHECK(type, N, X)		enum ionic_static_assert_enum_##X \
 		{ ionic_static_assert_##X = (N) / (sizeof(type X) == (N)) }
 #define IONIC_CHECK_CMD_LENGTH(X)		IONIC_SIZE_CHECK(struct, 64, X)
 #define IONIC_CHECK_COMP_LENGTH(X)  		IONIC_SIZE_CHECK(struct, 16, X)
 #define IONIC_CHECK_CMD_DATA_LENGTH(X)      	IONIC_SIZE_CHECK(union, 1912, X)
+#endif
 
 /**
  * enum ionic_cmd_opcode - Device commands
@@ -3279,9 +3285,11 @@ union ionic_adminq_comp {
 
 #define IONIC_BARS_MAX			6
 #define IONIC_PCI_BAR_DBELL		1
+#define IONIC_PCI_BAR_CMB		2
 
 /* BAR0 */
 #define IONIC_BAR0_SIZE				0x8000
+#define IONIC_BAR2_SIZE				0x800000
 
 #define IONIC_BAR0_DEV_INFO_REGS_OFFSET		0x0000
 #define IONIC_BAR0_DEV_CMD_REGS_OFFSET		0x0800
