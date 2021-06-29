@@ -50,16 +50,16 @@ we wanted to keep this archive closer to what is used internally.
 
 If the headers for your current Linux kernel are findable under
 /lib/modules with kernel config values defined, this should work:
-    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.8.12\\\"" modules
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.9.7\\\"" modules
 
 If the kernel config file doesn't have the Pensando configuration strings
 set in it, you can add them in the make line.
 
 For Naples drivers:
-    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.8.12\\\"" CONFIG_IONIC_MNIC=m CONFIG_MDEV=m CONFIG_MNET_UIO_PDRV_GENIRQ=m modules
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.9.7\\\"" CONFIG_IONIC_MNIC=m CONFIG_MDEV=m CONFIG_MNET_UIO_PDRV_GENIRQ=m modules
 
 For the host driver:
-    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.8.12\\\"" CONFIG_IONIC=m modules
+    make M=`pwd` KCFLAGS="-Werror -Ddrv_ver=\\\"1.15.9.7\\\"" CONFIG_IONIC=m modules
 
 As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
     make -C <kernel-header-path> M=`pwd` ...
@@ -114,3 +114,10 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - rx_mode locking to block thread race
  - struct ionic_lif rework for better cache line layout
 
+2021-06-30 - driver updates for 1.15.9-C-7
+ - monitoring fw status generation for fw restart hints
+ - catch lack of PTP support earlier in service routine
+ - makefile fixes for sles 15 sp3
+ - lower page splitting limit to better account for headers
+ - VF stats area fix for PF
+ - better thread-safe rx_mode work
