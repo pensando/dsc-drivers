@@ -121,3 +121,12 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - lower page splitting limit to better account for headers
  - VF stats area fix for PF
  - better thread-safe rx_mode work
+
+    drivers: updates for 1.15.9.21
+    
+2021-08-04 - driver updates for 1.15.9-C-21
+ - Added watchdog to platform for closer tracking of FW updates
+   and crash recycle
+ - Fixed dynamic interrupt management accounting
+ - Fixes for mac filter management
+
