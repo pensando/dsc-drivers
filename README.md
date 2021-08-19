@@ -130,6 +130,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - Fixed dynamic interrupt management accounting
  - Fixes for mac filter management
 
-2021-08-16 - driver updated for 1.15.9-C-26
+2021-08-16 - driver updates for 1.15.9-C-26
  - Add work-around for Elba doorbell issue
 
+2021-08-19 - driver updates for 1.15.9-C-28
+ - Additional queue config locking for stress timing issue
+ - Suppressed unnecessary log message
