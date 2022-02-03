@@ -42,6 +42,9 @@ ETH_KOPT += CONFIG_MDEV=m
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=m
 ETH_KOPT += CROSS_COMPILE=aarch64-linux-gnu-
 ETH_KOPT += ARCH=arm64
+KCFLAGS += -DCONFIG_IONIC_MNIC
+KCFLAGS += -DCONFIG_MDEV
+KCFLAGS += -DCONFIG_MNET_UIO_PDRV_GENIRQ
 ALL = mnic
 ALL += mnet_uio_pdrv_genirq
 ALL += mdev
@@ -59,6 +62,7 @@ ETH_KOPT += CONFIG_IONIC=m
 ETH_KOPT += CONFIG_IONIC_MNIC=_
 ETH_KOPT += CONFIG_MDEV=_
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
+KCFLAGS += -DCONFIG_IONIC
 
 KCFLAGS = -Werror
 KCFLAGS += $(EXTRA_CFLAGS)
@@ -101,7 +105,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "1.15.9.64"
+    DVER = "1.15.9.65"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"

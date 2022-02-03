@@ -142,3 +142,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 
 2022-02-02 - driver update for 1.15.9-C-64
  - Remove an unnecessary kcompat macro
+
+2022-02-03 - driver update for 1.15.9-C-65
+ - add vlan filter management to mac filter management
+ - update filter management for handling overflow
+ - updates for recent upstream kernels and distros
+ - better handling of various FW recovery scenarios
