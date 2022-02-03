@@ -139,3 +139,6 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 
 2021-08-25 - driver update for 1.15.9-C-32
  - added use of reserved memory region for dma
+
+2022-02-02 - driver update for 1.15.9-C-64
+ - Remove an unnecessary kcompat macro

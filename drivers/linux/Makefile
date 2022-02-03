@@ -34,7 +34,7 @@ ifeq ($(ARCH),aarch64)
 
 # Ionic mnic and mdev for drivers ARM
 include ${MKINFRA}/config_${ARCH}.mk
-KSRC ?= ${NICDIR}/buildroot/output/${ASIC}/linux-headers
+KSRC ?= ${BRDIR}/output/${ASIC}/linux-headers
 KMOD_OUT_DIR ?= ${BLD_OUT_DIR}/drivers_submake
 KMOD_SRC_DIR ?= ${TOPDIR}/platform/drivers/linux
 ETH_KOPT += CONFIG_IONIC_MNIC=m
@@ -101,7 +101,7 @@ DVER = $(shell echo $$SW_VERSION)
 ifeq ($(DVER),)
   DVER = $(shell git describe --tags 2>/dev/null)
   ifeq ($(DVER),)
-    DVER = "1.15.9.32"
+    DVER = "1.15.9.64"
   endif
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
