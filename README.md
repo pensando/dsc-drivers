@@ -148,3 +148,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - update filter management for handling overflow
  - updates for recent upstream kernels and distros
  - better handling of various FW recovery scenarios
+
+2022-06-20 - driver update for 1.15.9-C-100
+ - various code cleanups
+ - add debugfs support to count number of Tx/Rx allocations
+ - better memory handling
+ - minor bug fixes
