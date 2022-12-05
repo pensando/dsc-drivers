@@ -33,6 +33,7 @@ struct ionic_lif;
 
 extern bool port_init_up;
 extern unsigned int rx_copybreak;
+extern unsigned int rx_fill_threshold;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
 extern unsigned long affinity_mask_override;
