@@ -154,3 +154,14 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - add debugfs support to count number of Tx/Rx allocations
  - better memory handling
  - minor bug fixes
+
+2022-12-05 - driver update for 22.11.1-001
+ - update ionic drivers to 22.11.1-001; version numbers now follow
+   the driver release numbers rather than the DSC firmware release version
+ - enable tunnel offloads
+ - support for changes in MTU, queue count, and ring length while CMB is active
+ - set random VF mac addresses by default
+ - better oprom debugging support
+ - Rx/Tx performance tuning
+ - fixes imported from upstream driver
+ - bug fixes
