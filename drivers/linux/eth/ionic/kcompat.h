@@ -6767,13 +6767,14 @@ void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...);
 #if (!RHEL_RELEASE_CODE || (RHEL_RELEASE_CODE && \
        (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,0))))
 
-#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 6) == RHEL_RELEASE_CODE))
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 6) <= RHEL_RELEASE_CODE))
 #define HAVE_COALESCE_EXTACK
 #endif
 
 #define ndo_eth_ioctl ndo_do_ioctl
 
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
+#if !RHEL_RELEASE_CODE || (RHEL_RELEASE_VERSION(8, 7) > RHEL_RELEASE_CODE)
 static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 						size_t priv_size,
 						struct device *dev)
@@ -6781,6 +6782,9 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 	return devlink_alloc(ops, priv_size);
 }
 #define devlink_alloc  _kc_devlink_alloc
+#else
+#define HAVE_VOID_DEVLINK_REGISTER
+#endif
 #endif /* CONFIG_NET_DEVLINK */
 
 #else
@@ -6803,6 +6807,11 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 
 /*****************************************************************************/
 #if (KERNEL_VERSION(5, 17, 0) > LINUX_VERSION_CODE)
+
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 7) <= RHEL_RELEASE_CODE))
+#define HAVE_RINGPARAM_EXTACK
+#endif
+
 #else
 #define HAVE_RINGPARAM_EXTACK
 #endif /* 5.17 */
