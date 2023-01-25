@@ -299,14 +299,7 @@ static int ionic_qcq_enable(struct ionic_qcq *qcq)
 	if (qcq->napi.poll)
 		napi_enable(&qcq->napi);
 
-	if (lif->ionic->neth_eqs) {
-		qcq->armed = true;
-		ionic_dbell_ring(lif->kern_dbpage,
-				 qcq->q.hw_type,
-				 IONIC_DBELL_RING_1 |
-				 IONIC_DBELL_QID(qcq->q.hw_index) |
-				 qcq->cq.tail_idx);
-	} else if (qcq->flags & IONIC_QCQ_F_INTR) {
+	if (qcq->flags & IONIC_QCQ_F_INTR) {
 		irq_set_affinity_hint(qcq->intr.vector,
 				      &qcq->intr.affinity_mask);
 		ionic_intr_mask(idev->intr_ctrl, qcq->intr.index,
@@ -801,18 +794,6 @@ err_out:
 	return err;
 }
 
-static inline int ionic_choose_eq(struct ionic_lif *lif, int q_index)
-{
-	unsigned int abs_q;
-
-	if (lif->index)
-		abs_q = (lif->ionic->nrxqs_per_lif + lif->index);
-	else
-		abs_q = q_index;
-
-	return abs_q % lif->ionic->neth_eqs;
-}
-
 static void ionic_qcq_sanitize(struct ionic_qcq *qcq)
 {
 	qcq->q.tail_idx = 0;
@@ -840,6 +821,9 @@ static int ionic_lif_txq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 			.type = q->type,
 			.ver = lif->qtype_info[q->type].version,
 			.index = cpu_to_le32(q->index),
+			.flags = cpu_to_le16(IONIC_QINIT_F_IRQ |
+					     IONIC_QINIT_F_SG),
+			.intr_index = cpu_to_le16(qcq->intr.index),
 			.pid = cpu_to_le16(q->pid),
 			.ring_size = ilog2(q->num_descs),
 			.ring_base = cpu_to_le64(q->base_pa),
@@ -849,23 +833,6 @@ static int ionic_lif_txq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		},
 	};
 	int err;
-
-	if (lif->ionic->neth_eqs &&
-	    lif->qtype_info[q->type].features & IONIC_QIDENT_F_EQ) {
-		unsigned int eq_index = ionic_choose_eq(lif, q->index);
-
-		ctx.cmd.q_init.flags = cpu_to_le16(IONIC_QINIT_F_EQ |
-						   IONIC_QINIT_F_SG);
-		ctx.cmd.q_init.intr_index = cpu_to_le16(eq_index);
-	} else {
-		unsigned int intr_index;
-
-		intr_index = qcq->intr.index;
-
-		ctx.cmd.q_init.flags = cpu_to_le16(IONIC_QINIT_F_IRQ |
-						   IONIC_QINIT_F_SG);
-		ctx.cmd.q_init.intr_index = cpu_to_le16(intr_index);
-	}
 
 	if (qcq->flags & IONIC_QCQ_F_CMB_RINGS) {
 		ctx.cmd.q_init.flags |= cpu_to_le16(IONIC_QINIT_F_CMB);
@@ -922,6 +889,9 @@ static int ionic_lif_rxq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 			.type = q->type,
 			.ver = lif->qtype_info[q->type].version,
 			.index = cpu_to_le32(q->index),
+			.flags = cpu_to_le16(IONIC_QINIT_F_IRQ |
+					     IONIC_QINIT_F_SG),
+			.intr_index = cpu_to_le16(cq->bound_intr->index),
 			.pid = cpu_to_le16(q->pid),
 			.ring_size = ilog2(q->num_descs),
 			.ring_base = cpu_to_le64(q->base_pa),
@@ -932,18 +902,6 @@ static int ionic_lif_rxq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 	};
 	int err;
 
-	if (lif->ionic->neth_eqs &&
-	    lif->qtype_info[q->type].features & IONIC_QIDENT_F_EQ) {
-		unsigned int eq_index = ionic_choose_eq(lif, q->index);
-
-		ctx.cmd.q_init.flags = cpu_to_le16(IONIC_QINIT_F_EQ |
-						   IONIC_QINIT_F_SG);
-		ctx.cmd.q_init.intr_index = cpu_to_le16(eq_index);
-	} else {
-		ctx.cmd.q_init.flags = cpu_to_le16(IONIC_QINIT_F_IRQ |
-						   IONIC_QINIT_F_SG);
-		ctx.cmd.q_init.intr_index = cpu_to_le16(cq->bound_intr->index);
-	}
 
 	if (qcq->flags & IONIC_QCQ_F_CMB_RINGS) {
 		ctx.cmd.q_init.flags |= cpu_to_le16(IONIC_QINIT_F_CMB);
@@ -2219,9 +2177,7 @@ static int ionic_txrx_alloc(struct ionic_lif *lif)
 	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state))
 		flags |= IONIC_QCQ_F_CMB_RINGS;
 
-	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state) &&
-	    !(lif->ionic->neth_eqs &&
-	      lif->qtype_info[IONIC_QTYPE_TXQ].features & IONIC_QIDENT_F_EQ))
+	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state))
 		flags |= IONIC_QCQ_F_INTR;
 
 	for (i = 0; i < lif->nxqs; i++) {
@@ -2242,9 +2198,7 @@ static int ionic_txrx_alloc(struct ionic_lif *lif)
 		ionic_debugfs_add_qcq(lif, lif->txqcqs[i]);
 	}
 
-	flags = IONIC_QCQ_F_RX_STATS | IONIC_QCQ_F_SG;
-	if (!ionic_use_eqs(lif))
-		flags |= IONIC_QCQ_F_INTR;
+	flags = IONIC_QCQ_F_RX_STATS | IONIC_QCQ_F_SG | IONIC_QCQ_F_INTR;
 
 	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state))
 		flags |= IONIC_QCQ_F_CMB_RINGS;
@@ -3643,9 +3597,6 @@ void ionic_lif_deinit(struct ionic_lif *lif)
 			ionic_lif_rss_deinit(lif);
 	}
 
-	ionic_eqs_deinit(lif->ionic);
-	ionic_eqs_free(lif->ionic);
-
 	napi_disable(&lif->adminqcq->napi);
 	ionic_lif_qcq_deinit(lif, lif->notifyqcq);
 	ionic_lif_qcq_deinit(lif, lif->adminqcq);
@@ -3869,21 +3820,6 @@ int ionic_lif_init(struct ionic_lif *lif)
 		goto err_out_free_dbid;
 	}
 
-	if (lif->ionic->neth_eqs) {
-		err = ionic_eqs_alloc(lif->ionic);
-		if (err) {
-			dev_err(dev, "Cannot allocate EQs: %d\n", err);
-			lif->ionic->neth_eqs = 0;
-		} else {
-			err = ionic_eqs_init(lif->ionic);
-			if (err) {
-				dev_err(dev, "Cannot init EQs: %d\n", err);
-				ionic_eqs_free(lif->ionic);
-				lif->ionic->neth_eqs = 0;
-			}
-		}
-	}
-
 	err = ionic_lif_adminq_init(lif);
 	if (err)
 		goto err_out_adminq_deinit;
@@ -3921,8 +3857,6 @@ err_out_notifyq_deinit:
 	ionic_lif_qcq_deinit(lif, lif->notifyqcq);
 err_out_adminq_deinit:
 	ionic_lif_qcq_deinit(lif, lif->adminqcq);
-	ionic_eqs_deinit(lif->ionic);
-	ionic_eqs_free(lif->ionic);
 	ionic_lif_reset(lif);
 	ionic_bus_unmap_dbpage(lif->ionic, lif->kern_dbpage);
 	lif->kern_dbpage = NULL;
@@ -4097,21 +4031,6 @@ static void ionic_lif_queue_identify(struct ionic_lif *lif)
 		dev_dbg(ionic->dev, " qtype[%d].sg_desc_stride = %d\n",
 			qtype, qti->sg_desc_stride);
 	}
-
-	/* Make sure that EQ support is disabled if not all the
-	 * bits are in place.
-	 *
-	 * This is to support internal testing with intermediate FW
-	 * versions, especially with testing FW upgrade, and shouldn't
-	 * be needed in released versions.
-	 */
-	if ((lif->qtype_info[IONIC_QTYPE_RXQ].features & IONIC_QIDENT_F_EQ) !=
-	    (lif->qtype_info[IONIC_QTYPE_TXQ].features & IONIC_QIDENT_F_EQ)) {
-		dev_warn(ionic->dev, "EQ version bugfix\n");
-		lif->qtype_info[IONIC_QTYPE_RXQ].features &= ~IONIC_QIDENT_F_EQ;
-		lif->qtype_info[IONIC_QTYPE_TXQ].features &= ~IONIC_QIDENT_F_EQ;
-		ionic->neth_eqs = 0;
-	}
 }
 
 int ionic_lif_identify(struct ionic *ionic, u8 lif_type,
@@ -4166,11 +4085,9 @@ int ionic_lif_size(struct ionic *ionic)
 	unsigned int ntxqs_per_lif;
 	unsigned int nrxqs_per_lif;
 	unsigned int nnqs_per_lif;
-	unsigned int dev_neth_eqs;
 	unsigned int dev_nintrs;
 	unsigned int min_intrs;
 	unsigned int nrdma_eqs;
-	unsigned int neth_eqs;
 	unsigned int nintrs;
 	unsigned int nxqs;
 	int err;
@@ -4178,12 +4095,6 @@ int ionic_lif_size(struct ionic *ionic)
 	/* retrieve basic values from FW */
 	lc = &ident->lif.eth.config;
 	dev_nintrs = le32_to_cpu(ident->dev.nintrs);
-
-	if (ionic->is_mgmt_nic)
-		dev_neth_eqs = 0;
-	else
-		dev_neth_eqs = le32_to_cpu(ident->dev.eq_count);
-	dev_neth_eqs = min_t(int, dev_neth_eqs, MAX_ETH_EQS);
 
 	nrdma_eqs_per_lif = le32_to_cpu(ident->lif.rdma.eq_qtype.qid_count);
 	nnqs_per_lif = le32_to_cpu(lc->queue_count[IONIC_QTYPE_NOTIFYQ]);
@@ -4209,9 +4120,6 @@ int ionic_lif_size(struct ionic *ionic)
 	 * One way of managing this is that when the interrupt count gets
 	 * out of hand we cut down on the number of things that need
 	 * interrupts until we get down to what we can get from the OS.
-	 *
-	 * Another way of managing this is by using a smaller number of
-	 * EventQueues on which we can multiplex interrupt events.
 	 */
 
 	/* reserve last queue id for hardware timestamping */
@@ -4228,7 +4136,6 @@ int ionic_lif_size(struct ionic *ionic)
 	nxqs = min(ntxqs_per_lif, nrxqs_per_lif);
 	nxqs = min(nxqs, num_online_cpus());
 	nrdma_eqs = min(nrdma_eqs_per_lif, num_online_cpus());
-	neth_eqs = min(dev_neth_eqs, num_online_cpus());
 
 	/* EventQueue interrupt usage: (if eq_count != 0)
 	 *    1 aq intr + n EQs + m RDMA
@@ -4239,10 +4146,7 @@ int ionic_lif_size(struct ionic *ionic)
 	 *    + whatever's left is for RDMA queues
 	 */
 try_again:
-	if (neth_eqs)
-		nintrs = 1 + neth_eqs + nrdma_eqs;
-	else
-		nintrs = 1 + nxqs + nrdma_eqs;
+	nintrs = 1 + nxqs + nrdma_eqs;
 	min_intrs = 2;  /* adminq + 1 TxRx queue pair */
 
 	if (nintrs > dev_nintrs)
@@ -4266,7 +4170,6 @@ try_again:
 	ionic->nrxqs_per_lif = nxqs;
 	ionic->nintrs = nintrs;
 	ionic->nlifs = 1;
-	ionic->neth_eqs = neth_eqs;
 
 	ionic_debugfs_add_sizes(ionic);
 
@@ -4284,11 +4187,6 @@ try_fewer:
 	/* Cut RDMA EQs in half */
 	if (nrdma_eqs > 1) {
 		nrdma_eqs >>= 1;
-		goto try_again;
-	}
-	/* Cut Eth EQs in half */
-	if (neth_eqs > 1) {
-		neth_eqs >>= 1;
 		goto try_again;
 	}
 	/* Cut number of TxRx queuepairs */

@@ -307,27 +307,6 @@ struct ionic_cq {
 	dma_addr_t base_pa;	/* must be page aligned */
 } ____cacheline_aligned_in_smp;
 
-struct ionic_eq_ring {
-	struct ionic_eq_comp *base;
-	dma_addr_t base_pa;
-
-	int index;
-	u8 gen_color;
-};
-
-struct ionic_eq {
-	struct ionic *ionic;
-	struct ionic_eq_ring ring[2];
-	struct ionic_intr_info intr;
-
-	int index;
-	int depth;
-
-	bool is_init;
-};
-
-#define IONIC_EQ_DEPTH 0x1000
-
 struct ionic;
 
 static inline void ionic_intr_init(struct ionic_dev *idev,
@@ -396,11 +375,6 @@ int ionic_db_page_num(struct ionic_lif *lif, int pid);
 
 int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int order);
 void ionic_put_cmb(struct ionic_lif *lif, u32 pgid, int order);
-
-int ionic_eqs_alloc(struct ionic *ionic);
-void ionic_eqs_free(struct ionic *ionic);
-void ionic_eqs_deinit(struct ionic *ionic);
-int ionic_eqs_init(struct ionic *ionic);
 
 int ionic_cq_init(struct ionic_lif *lif, struct ionic_cq *cq,
 		  struct ionic_intr_info *intr,

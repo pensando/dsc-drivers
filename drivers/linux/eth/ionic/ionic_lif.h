@@ -374,12 +374,6 @@ static inline bool ionic_is_pf(struct ionic *ionic)
 	       ionic->pdev->device == PCI_DEVICE_ID_PENSANDO_IONIC_ETH_PF;
 }
 
-static inline bool ionic_use_eqs(struct ionic_lif *lif)
-{
-	return lif->ionic->neth_eqs &&
-	       lif->qtype_info[IONIC_QTYPE_RXQ].features & IONIC_QIDENT_F_EQ;
-}
-
 void ionic_lif_deferred_enqueue(struct ionic_deferred *def,
 				struct ionic_deferred_work *work);
 void ionic_link_status_check_request(struct ionic_lif *lif, bool can_sleep);

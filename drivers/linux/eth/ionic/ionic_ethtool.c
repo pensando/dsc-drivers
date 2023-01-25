@@ -591,12 +591,6 @@ static int ionic_set_coalesce(struct net_device *netdev,
 	    coalesce->rate_sample_interval)
 		return -EINVAL;
 
-	if (lif->ionic->neth_eqs &&
-	    (coalesce->use_adaptive_rx_coalesce ||
-	     coalesce->use_adaptive_tx_coalesce)) {
-		return -EINVAL;
-	}
-
 	ident = &lif->ionic->ident;
 	if (ident->dev.intr_coal_div == 0) {
 		netdev_warn(netdev, "bad HW value in dev.intr_coal_div = %d\n",
@@ -775,10 +769,8 @@ static void ionic_get_channels(struct net_device *netdev,
 
 	/* report maximum channels */
 	ch->max_combined = lif->ionic->ntxqs_per_lif;
-	if (!ionic_use_eqs(lif)) {
-		ch->max_rx = lif->ionic->ntxqs_per_lif / 2;
-		ch->max_tx = lif->ionic->ntxqs_per_lif / 2;
-	}
+	ch->max_rx = lif->ionic->ntxqs_per_lif / 2;
+	ch->max_tx = lif->ionic->ntxqs_per_lif / 2;
 
 	/* report current channels */
 	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state)) {
@@ -816,11 +808,6 @@ static int ionic_set_channels(struct net_device *netdev,
 
 	if (ch->rx_count != ch->tx_count) {
 		netdev_info(netdev, "The rx and tx count must be equal\n");
-		return -EINVAL;
-	}
-
-	if (ionic_use_eqs(lif) && ch->rx_count) {
-		netdev_info(netdev, "Separate rx and tx count not available when using EventQueues\n");
 		return -EINVAL;
 	}
 
