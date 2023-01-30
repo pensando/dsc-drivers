@@ -617,11 +617,17 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 	}
 
 	if (flags & IONIC_QCQ_F_NOTIFYQ) {
-		/* q & cq need to be contiguous in case of notifyq */
-		new->q_size = PAGE_SIZE + ALIGN(num_descs * desc_size, PAGE_SIZE) +
-						ALIGN(num_descs * cq_desc_size, PAGE_SIZE);
-		new->q_base = dma_alloc_coherent(dev, new->q_size + new->cq_size,
-						&new->q_base_pa, GFP_KERNEL);
+		int q_size;
+
+		/* q & cq need to be contiguous in NotifyQ, so alloc it all in q
+		 * and don't alloc qc.  We leave new->qc_size and new->qc_base
+		 * as 0 to be sure we don't try to free it later.
+		 */
+		q_size = ALIGN(num_descs * desc_size, PAGE_SIZE);
+		new->q_size = PAGE_SIZE + q_size +
+			      ALIGN(num_descs * cq_desc_size, PAGE_SIZE);
+		new->q_base = dma_alloc_coherent(dev, new->q_size,
+						 &new->q_base_pa, GFP_KERNEL);
 		if (!new->q_base) {
 			netdev_err(lif->netdev, "Cannot allocate qcq DMA memory\n");
 			err = -ENOMEM;
@@ -631,10 +637,8 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 		q_base_pa = ALIGN(new->q_base_pa, PAGE_SIZE);
 		ionic_q_map(&new->q, q_base, q_base_pa);
 
-		cq_base = PTR_ALIGN(q_base +
-			ALIGN(num_descs * desc_size, PAGE_SIZE), PAGE_SIZE);
-		cq_base_pa = ALIGN(new->q_base_pa +
-			ALIGN(num_descs * desc_size, PAGE_SIZE), PAGE_SIZE);
+		cq_base = PTR_ALIGN(q_base + q_size, PAGE_SIZE);
+		cq_base_pa = ALIGN(new->q_base_pa + q_size, PAGE_SIZE);
 		ionic_cq_map(&new->cq, cq_base, cq_base_pa);
 		ionic_cq_bind(&new->cq, &new->q);
 	} else {
