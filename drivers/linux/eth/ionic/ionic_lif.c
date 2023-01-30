@@ -2220,17 +2220,15 @@ static int ionic_txrx_alloc(struct ionic_lif *lif)
 
 		lif->rxqcqs[i]->q.features = lif->rxq_features;
 
-		if (flags & IONIC_QCQ_F_INTR) {
-			ionic_intr_coal_init(lif->ionic->idev.intr_ctrl,
-					     lif->rxqcqs[i]->intr.index,
-					     lif->rx_coalesce_hw);
-			if (test_bit(IONIC_LIF_F_RX_DIM_INTR, lif->state))
-				lif->rxqcqs[i]->intr.dim_coal_hw = lif->rx_coalesce_hw;
+		ionic_intr_coal_init(lif->ionic->idev.intr_ctrl,
+				     lif->rxqcqs[i]->intr.index,
+				     lif->rx_coalesce_hw);
+		if (test_bit(IONIC_LIF_F_RX_DIM_INTR, lif->state))
+			lif->rxqcqs[i]->intr.dim_coal_hw = lif->rx_coalesce_hw;
 
-			if (!test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state))
-				ionic_link_qcq_interrupts(lif->rxqcqs[i],
-							  lif->txqcqs[i]);
-		}
+		if (!test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state))
+			ionic_link_qcq_interrupts(lif->rxqcqs[i],
+						  lif->txqcqs[i]);
 
 		ionic_debugfs_add_qcq(lif, lif->rxqcqs[i]);
 	}
@@ -4080,15 +4078,14 @@ int ionic_lif_identify(struct ionic *ionic, u8 lif_type,
 int ionic_lif_size(struct ionic *ionic)
 {
 	struct ionic_identity *ident = &ionic->ident;
+	unsigned int nintrs, dev_nintrs;
 	unsigned int nrdma_eqs_per_lif;
 	union ionic_lif_config *lc;
 	unsigned int ntxqs_per_lif;
 	unsigned int nrxqs_per_lif;
 	unsigned int nnqs_per_lif;
-	unsigned int dev_nintrs;
 	unsigned int min_intrs;
 	unsigned int nrdma_eqs;
-	unsigned int nintrs;
 	unsigned int nxqs;
 	int err;
 
@@ -4137,13 +4134,10 @@ int ionic_lif_size(struct ionic *ionic)
 	nxqs = min(nxqs, num_online_cpus());
 	nrdma_eqs = min(nrdma_eqs_per_lif, num_online_cpus());
 
-	/* EventQueue interrupt usage: (if eq_count != 0)
-	 *    1 aq intr + n EQs + m RDMA
-	 *
-	 * Default interrupt usage:
-	 *         lif0 has n TxRx queues and 1 Adminq
-	 *    (1 aq interrupt + n TxRx queue interrupts)
-	 *    + whatever's left is for RDMA queues
+	/* interrupt usage:
+	 *    1 for master lif adminq/notifyq
+	 *    1 for each CPU for master lif TxRx queues
+	 *    whatever's left is for RDMA queues
 	 */
 try_again:
 	nintrs = 1 + nxqs + nrdma_eqs;
