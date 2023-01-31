@@ -122,7 +122,7 @@ int ionic_devlink_register(struct ionic *ionic)
 		return err;
 	}
 
-	devlink_port_type_eth_set(&ionic->dl_port, ionic->lif->netdev);
+	SET_NETDEV_DEVLINK_PORT(ionic->lif->netdev, &ionic->dl_port);
 	devlink_register(dl);
 #else
 	err = devlink_register(dl, ionic->dev);

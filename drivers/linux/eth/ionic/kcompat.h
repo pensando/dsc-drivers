@@ -6844,6 +6844,13 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #else
 #endif /* 6.1 */
 
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
+#define SET_NETDEV_DEVLINK_PORT(dev, port)   devlink_port_type_eth_set(port, dev)
+#else
+#define devlink_info_driver_name_put(x, y)  0
+#endif /* 6.2 */
+
 /* We don't support PTP on older RHEL kernels (needs more compat work) */
 #if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))
 #undef CONFIG_PTP_1588_CLOCK
