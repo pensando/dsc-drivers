@@ -699,6 +699,9 @@ static int ionic_set_ringparam(struct net_device *netdev,
 	struct ionic_queue_params qparam;
 	int err;
 
+	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
+		return -EBUSY;
+
 	ionic_init_queue_params(lif, &qparam);
 
 	if (ring->rx_mini_pending || ring->rx_jumbo_pending) {
@@ -789,6 +792,9 @@ static int ionic_set_channels(struct net_device *netdev,
 	int max_cnt;
 	int err;
 
+	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
+		return -EBUSY;
+
 	ionic_init_queue_params(lif, &qparam);
 
 	/* Valid cases
@@ -873,6 +879,25 @@ static int ionic_set_channels(struct net_device *netdev,
 	mutex_unlock(&lif->queue_lock);
 	if (err)
 		netdev_info(netdev, "Queue reconfiguration failed, changes canceled: %d\n", err);
+
+	return err;
+}
+
+static int ionic_get_rxnfc(struct net_device *netdev,
+			   struct ethtool_rxnfc *info, u32 *rules)
+{
+	struct ionic_lif *lif = netdev_priv(netdev);
+	int err = 0;
+
+	switch (info->cmd) {
+	case ETHTOOL_GRXRINGS:
+		info->data = lif->nxqs;
+		break;
+	default:
+		netdev_err(netdev, "Command parameter %d is not supported\n",
+			   info->cmd);
+		err = -EOPNOTSUPP;
+	}
 
 	return err;
 }
@@ -973,25 +998,6 @@ static int ionic_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 	}
 
 	return 0;
-}
-
-static int ionic_get_rxnfc(struct net_device *netdev,
-			   struct ethtool_rxnfc *info, u32 *rules)
-{
-	struct ionic_lif *lif = netdev_priv(netdev);
-	int err = 0;
-
-	switch (info->cmd) {
-	case ETHTOOL_GRXRINGS:
-		info->data = lif->nxqs;
-		break;
-	default:
-		netdev_err(netdev, "Command parameter %d is not supported\n",
-			   info->cmd);
-		err = -EOPNOTSUPP;
-	}
-
-	return err;
 }
 
 static u32 ionic_get_rxfh_indir_size(struct net_device *netdev)

@@ -211,7 +211,7 @@ do_check_time:
 
 	fw_status = ioread8(&idev->dev_info_regs->fw_status);
 
-	 /* If fw_status is not ready don't bother with the generation */
+	/* If fw_status is not ready don't bother with the generation */
 	if (!ionic_is_fw_running(idev)) {
 		fw_status_ready = false;
 	} else {
@@ -230,7 +230,8 @@ do_check_time:
 			 *
 			 * If we had already moved to FW_RESET from a RESET event,
 			 * it is possible that we never saw the fw_status go to 0,
-			 * so we fake it a bit here to get FW up again.
+			 * so we fake the current idev->fw_status_ready here to
+			 * force the transition and get FW up again.
 			 */
 			if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 				idev->fw_status_ready = false;	/* go to running */
@@ -250,14 +251,14 @@ do_check_time:
 
 		idev->fw_status_ready = fw_status_ready;
 
-		if (!fw_status_ready && lif &&
+		if (!fw_status_ready &&
 		    !test_bit(IONIC_LIF_F_FW_RESET, lif->state) &&
 		    !test_and_set_bit(IONIC_LIF_F_FW_STOPPING, lif->state)) {
 
 			dev_info(ionic->dev, "FW stopped 0x%02x\n", fw_status);
 			trigger = true;
 
-		} else if (fw_status_ready && lif &&
+		} else if (fw_status_ready &&
 			   test_bit(IONIC_LIF_F_FW_RESET, lif->state) &&
 			   !test_bit(IONIC_LIF_F_FW_STOPPING, lif->state)) {
 
@@ -533,7 +534,7 @@ void ionic_vf_start(struct ionic *ionic, int vf)
 		.vf_ctrl.opcode = IONIC_CMD_VF_CTRL,
 	};
 
-	if (!(ionic->ident.dev.capabilities & IONIC_DEV_CAP_VF_CTRL))
+	if (!(ionic->ident.dev.capabilities & cpu_to_le64(IONIC_DEV_CAP_VF_CTRL)))
 		return;
 
 	if (vf == -1) {
@@ -544,7 +545,7 @@ void ionic_vf_start(struct ionic *ionic, int vf)
 	}
 
 	ionic_dev_cmd_go(&ionic->idev, &cmd);
-	(void)ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	ionic_dev_cmd_wait(ionic, devcmd_timeout);
 #endif
 }
 

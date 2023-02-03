@@ -604,7 +604,7 @@ void ionic_rx_fill(struct ionic_queue *q)
 						 IONIC_RXQ_DESC_OPCODE_SIMPLE;
 		desc_info->nbufs = nfrags;
 
-		/* commit descriptor contents in one shot */
+		/* commit CMB descriptor contents in one shot */
 		if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
 			memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
 
@@ -758,13 +758,13 @@ int ionic_txrx_napi(struct napi_struct *napi, int budget)
 	struct ionic_qcq *rxqcq = napi_to_qcq(napi);
 	struct ionic_cq *rxcq = napi_to_cq(napi);
 	unsigned int qi = rxcq->bound_q->index;
+	struct ionic_qcq *txqcq;
 	struct ionic_dev *idev;
 	struct ionic_lif *lif;
-	struct ionic_qcq *txqcq;
 	struct ionic_cq *txcq;
 	bool resched = false;
-	u32 tx_work_done = 0;
 	u32 rx_work_done = 0;
+	u32 tx_work_done = 0;
 	u32 flags = 0;
 
 	lif = rxcq->bound_q->lif;
@@ -1113,7 +1113,7 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 	desc->hdr_len = cpu_to_le16(hdrlen);
 	desc->mss = cpu_to_le16(mss);
 
-	/* commit descriptor contents in one shot */
+	/* commit CMB descriptor contents in one shot */
 	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
 		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
 
@@ -1268,11 +1268,11 @@ static int ionic_tx_tso(struct ionic_queue *q, struct sk_buff *skb)
 static void ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 			       struct ionic_desc_info *desc_info)
 {
+	struct ionic_txq_desc *desc = desc_info->txq_desc;
 	struct ionic_buf_info *buf_info = desc_info->bufs;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_tx_stats *stats = q_to_tx_stats(q);
 #endif
-	struct ionic_txq_desc *desc = desc_info->desc;
 	bool has_vlan;
 	u8 flags = 0;
 	bool encap;
@@ -1298,7 +1298,7 @@ static void ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 	desc->csum_start = cpu_to_le16(skb_checksum_start_offset(skb));
 	desc->csum_offset = cpu_to_le16(skb->csum_offset);
 
-	/* commit descriptor contents in one shot */
+	/* commit CMB descriptor contents in one shot */
 	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
 		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
 
@@ -1342,8 +1342,10 @@ static void ionic_tx_calc_no_csum(struct ionic_queue *q, struct sk_buff *skb,
 		stats->vlan_inserted++;
 #endif
 	}
+	desc->csum_start = 0;
+	desc->csum_offset = 0;
 
-	/* commit descriptor contents in one shot */
+	/* commit CMB descriptor contents in one shot */
 	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
 		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
 

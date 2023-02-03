@@ -190,7 +190,7 @@ typedef void (*ionic_desc_cb)(struct ionic_queue *q,
 #define IONIC_PAGE_SIZE				(PAGE_SIZE << IONIC_PAGE_ORDER)
 #define IONIC_PAGE_SPLIT_SZ			(PAGE_SIZE / 4)
 #define IONIC_PAGE_GFP_MASK			(GFP_ATOMIC | __GFP_NOWARN |\
-	__GFP_COMP | __GFP_MEMALLOC)
+						 __GFP_COMP | __GFP_MEMALLOC)
 
 struct ionic_buf_info {
 	struct page *page;
@@ -360,10 +360,10 @@ int ionic_set_vf_config(struct ionic *ionic, int vf,
 			struct ionic_vf_setattr_cmd *vfc);
 int ionic_dev_cmd_vf_getattr(struct ionic *ionic, int vf, u8 attr,
 			     struct ionic_vf_getattr_comp *comp);
-void ionic_vf_start(struct ionic *ionic, int vf);
 
 void ionic_dev_cmd_queue_identify(struct ionic_dev *idev,
 				  u16 lif_type, u8 qtype, u8 qver);
+void ionic_vf_start(struct ionic *ionic, int vf);
 void ionic_dev_cmd_lif_identify(struct ionic_dev *idev, u8 type, u8 ver);
 void ionic_dev_cmd_lif_init(struct ionic_dev *idev, u16 lif_index,
 			    dma_addr_t addr);
