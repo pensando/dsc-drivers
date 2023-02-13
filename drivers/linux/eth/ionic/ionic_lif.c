@@ -2174,7 +2174,7 @@ static int ionic_txrx_alloc(struct ionic_lif *lif)
 
 	flags = IONIC_QCQ_F_TX_STATS | IONIC_QCQ_F_SG;
 
-	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state))
+	if (test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state))
 		flags |= IONIC_QCQ_F_CMB_RINGS;
 
 	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state))
@@ -2200,7 +2200,7 @@ static int ionic_txrx_alloc(struct ionic_lif *lif)
 
 	flags = IONIC_QCQ_F_RX_STATS | IONIC_QCQ_F_SG | IONIC_QCQ_F_INTR;
 
-	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state))
+	if (test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state))
 		flags |= IONIC_QCQ_F_CMB_RINGS;
 
 	num_desc = lif->nrxq_descs;
@@ -3038,7 +3038,8 @@ int ionic_reconfigure_queues(struct ionic_lif *lif,
 	int err = 0;
 
 	/* Are we changing q params while CMB is on */
-	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state) && qparam->cmb_enabled)
+	if ((test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) && qparam->cmb_tx) ||
+	    (test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state) && qparam->cmb_rx))
 		return ionic_cmb_reconfig(lif, qparam);
 
 	/* allocate temporary qcq arrays to hold new queue structs */

@@ -46,14 +46,33 @@ static int ionic_validate_cmb_config(struct ionic_lif *lif,
 	int pages_have, pages_required = 0;
 	unsigned long sz;
 
-	if (!qparam->cmb_enabled)
-		return 0;
+	if (!lif->ionic->idev.cmb_inuse &&
+	    (qparam->cmb_tx || qparam->cmb_rx)) {
+		netdev_info(lif->netdev, "CMB rings are not supported on this device\n");
+		return -EOPNOTSUPP;
+	}
 
-	sz = sizeof(struct ionic_txq_desc) * qparam->ntxq_descs * qparam->nxqs;
-	pages_required += ALIGN(sz, PAGE_SIZE) / PAGE_SIZE;
+	if (qparam->cmb_tx) {
+		if (!(lif->qtype_info[IONIC_QTYPE_TXQ].features & IONIC_QIDENT_F_CMB)) {
+			netdev_info(lif->netdev,
+				    "CMB rings for tx-push are not supported on this device\n");
+			return -EOPNOTSUPP;
+		}
 
-	sz = sizeof(struct ionic_rxq_desc) * qparam->nrxq_descs * qparam->nxqs;
-	pages_required += ALIGN(sz, PAGE_SIZE) / PAGE_SIZE;
+		sz = sizeof(struct ionic_txq_desc) * qparam->ntxq_descs * qparam->nxqs;
+		pages_required += ALIGN(sz, PAGE_SIZE) / PAGE_SIZE;
+	}
+
+	if (qparam->cmb_rx) {
+		if (!(lif->qtype_info[IONIC_QTYPE_RXQ].features & IONIC_QIDENT_F_CMB)) {
+			netdev_info(lif->netdev,
+				    "CMB rings for rx-push are not supported on this device\n");
+			return -EOPNOTSUPP;
+		}
+
+		sz = sizeof(struct ionic_rxq_desc) * qparam->nrxq_descs * qparam->nxqs;
+		pages_required += ALIGN(sz, PAGE_SIZE) / PAGE_SIZE;
+	}
 
 	pages_have = lif->ionic->bars[IONIC_PCI_BAR_CMB].len / PAGE_SIZE;
 	if (pages_required > pages_have) {
@@ -910,42 +929,38 @@ int ionic_cmb_pages_in_use(struct ionic_lif *lif)
 	return ionic_validate_cmb_config(lif, &qparam);
 }
 
-static int ionic_cmb_rings_toggle(struct ionic_lif *lif, bool cmb_enable)
+static int ionic_cmb_rings_toggle(struct ionic_lif *lif, bool cmb_tx, bool cmb_rx)
 {
 	struct ionic_queue_params qparam;
 	int pages_used;
 
-	if (!(lif->qtype_info[IONIC_QTYPE_TXQ].features & IONIC_QIDENT_F_CMB) ||
-	    !(lif->qtype_info[IONIC_QTYPE_RXQ].features & IONIC_QIDENT_F_CMB) ||
-	    !lif->ionic->idev.cmb_npages) {
-		netdev_info(lif->netdev, "CMB rings are not supported on this device\n");
-		return -EOPNOTSUPP;
+	if (netif_running(lif->netdev)) {
+		netdev_info(lif->netdev, "Please stop device to toggle CMB for tx/rx-push\n");
+		return -EBUSY;
 	}
 
-	if (netif_running(lif->netdev))
-		return -EBUSY;
-
 	ionic_init_queue_params(lif, &qparam);
-	qparam.cmb_enabled = cmb_enable;
+	qparam.cmb_tx = cmb_tx;
+	qparam.cmb_rx = cmb_rx;
 	pages_used = ionic_validate_cmb_config(lif, &qparam);
 	if (pages_used < 0)
 		return pages_used;
 
-	if (cmb_enable) {
-		netdev_info(lif->netdev, "Enabling CMB rings - %d pages\n",
-			    pages_used);
-		set_bit(IONIC_LIF_F_CMB_RINGS, lif->state);
-	} else {
-		netdev_info(lif->netdev, "Disabling CMB rings\n");
-		clear_bit(IONIC_LIF_F_CMB_RINGS, lif->state);
-	}
+	if (cmb_tx)
+		set_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state);
+	else
+		clear_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state);
 
-	/* We are currently restricting CMB mode enable/disable to
-	 * only when the driver is DOWN, in order to keep reconfig
-	 * thrash to a minimum and to keep the reconfig code simpler.
-	 * In the future when we relax this requirement we can call
-	 * ionic_reconfigure_queues() here.
-	 */
+	if (cmb_rx)
+		set_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state);
+	else
+		clear_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state);
+
+	if (cmb_tx || cmb_rx)
+		netdev_info(lif->netdev, "Enabling CMB %s %s rings - %d pages\n",
+			    cmb_tx ? "TX" : "", cmb_rx ? "RX" : "", pages_used);
+	else
+		netdev_info(lif->netdev, "Disabling CMB rings\n");
 
 	return 0;
 }
@@ -961,7 +976,8 @@ static u32 ionic_get_priv_flags(struct net_device *netdev)
 	if (test_bit(IONIC_LIF_F_RDMA_SNIFFER, lif->state))
 		priv_flags |= IONIC_PRIV_F_RDMA_SNIFFER;
 
-	if (test_bit(IONIC_LIF_F_CMB_RINGS, lif->state))
+	if (test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) ||
+	    test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state))
 		priv_flags |= IONIC_PRIV_F_CMB_RINGS;
 
 	return priv_flags;
@@ -970,7 +986,7 @@ static u32 ionic_get_priv_flags(struct net_device *netdev)
 static int ionic_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
-	bool cmb_now, cmb_req;
+	bool cmb_req;
 	int rdma;
 	int ret;
 
@@ -989,10 +1005,12 @@ static int ionic_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 	if (rdma != test_bit(IONIC_LIF_F_RDMA_SNIFFER, lif->state))
 		ionic_lif_rx_mode(lif);
 
-	cmb_now = test_bit(IONIC_LIF_F_CMB_RINGS, lif->state);
 	cmb_req = !!(priv_flags & IONIC_PRIV_F_CMB_RINGS);
-	if (cmb_now != cmb_req) {
-		ret = ionic_cmb_rings_toggle(lif, cmb_req);
+	if ((cmb_req && !(test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) &&
+			  test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state))) ||
+	    (!cmb_req && (test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) ||
+			  test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state)))) {
+		ret = ionic_cmb_rings_toggle(lif, cmb_req, cmb_req);
 		if (ret < 0)
 			return ret;
 	}
