@@ -746,6 +746,10 @@ static void ionic_get_ringparam(struct net_device *netdev,
 	ring->tx_pending = lif->ntxq_descs;
 	ring->rx_max_pending = IONIC_MAX_RX_DESC;
 	ring->rx_pending = lif->nrxq_descs;
+#ifdef HAVE_RX_PUSH
+	kernel_ring->tx_push = test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state);
+	kernel_ring->rx_push = test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state);
+#endif
 }
 
 #ifdef HAVE_RINGPARAM_EXTACK
@@ -794,16 +798,36 @@ static int ionic_set_ringparam(struct net_device *netdev,
 
 	/* if nothing to do return success */
 	if (ring->tx_pending == lif->ntxq_descs &&
-	    ring->rx_pending == lif->nrxq_descs)
+	    ring->rx_pending == lif->nrxq_descs
+#ifdef HAVE_RX_PUSH
+	    &&
+	    kernel_ring->tx_push == test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) &&
+	    kernel_ring->rx_push == test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state)
+#endif
+	    )
 		return 0;
 
 	qparam.ntxq_descs = ring->tx_pending;
 	qparam.nrxq_descs = ring->rx_pending;
+#ifdef HAVE_RX_PUSH
+	qparam.cmb_tx = kernel_ring->tx_push;
+	qparam.cmb_rx = kernel_ring->rx_push;
+#endif
 
 	err = ionic_validate_cmb_config(lif, &qparam);
 	if (err < 0)
 		return err;
 
+#ifdef HAVE_RX_PUSH
+	if (kernel_ring->tx_push != test_bit(IONIC_LIF_F_CMB_TX_RINGS, lif->state) ||
+	    kernel_ring->rx_push != test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state)) {
+		err = ionic_cmb_rings_toggle(lif, kernel_ring->tx_push,
+					     kernel_ring->rx_push);
+		if (err < 0)
+			return err;
+	}
+
+#endif
 	if (ring->tx_pending != lif->ntxq_descs)
 		netdev_info(netdev, "Changing Tx ring size from %d to %d\n",
 			    lif->ntxq_descs, ring->tx_pending);
@@ -1320,6 +1344,10 @@ static const struct ethtool_ops ionic_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_USE_ADAPTIVE_RX |
 				     ETHTOOL_COALESCE_USE_ADAPTIVE_TX,
+#endif
+#ifdef HAVE_RX_PUSH
+	.supported_ring_params = ETHTOOL_RING_USE_TX_PUSH |
+				 ETHTOOL_RING_USE_RX_PUSH,
 #endif
 	.get_drvinfo		= ionic_get_drvinfo,
 	.get_regs_len		= ionic_get_regs_len,
