@@ -4194,6 +4194,15 @@ void ionic_device_reset(struct ionic_lif *lif)
 
 	dev_info(ionic->dev, "Device reset starting\n");
 
+	/* Stop the timer first so it can't re-schedule more work, but note
+	 * that there is a small chance the device could send an
+	 * IONIC_EVENT_RESET, which could cause another work item to be
+	 * scheduled and render these del/cancel calls useless (i.e. don't mix
+	 * device triggered resets with userspace triggered resets).
+	 */
+	del_timer_sync(&ionic->watchdog_timer);
+	cancel_work_sync(&lif->deferred.work);
+
 	mutex_lock(&lif->queue_lock);
 	ionic_stop_queues_reconfig(lif);
 	ionic_txrx_free(lif);
@@ -4240,6 +4249,7 @@ void ionic_device_reset(struct ionic_lif *lif)
 	mutex_unlock(&lif->queue_lock);
 
 	netif_device_attach(lif->netdev);
+	mod_timer(&ionic->watchdog_timer, jiffies + 1);
 
 	dev_info(ionic->dev, "Device reset done\n");
 	return;
