@@ -50,15 +50,6 @@
         pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(fld));             \
         break;
 
-#define VIRTIO_DEV_REG_WR_COND(fld, cond)                               \
-        case VIRTIO_DEV_REG_OFF(fld):                                              \
-            pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" cond %u", \
-                pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, cond);  \
-            if (cond) {                                                            \
-                pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(fld));                \
-            }                                                                      \
-            break;
-
 #define VIRTIO_DEV_REG_WR_PROC(fld, proc)                               \
         case VIRTIO_DEV_REG_OFF(fld):                                              \
             pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" proc %s", \
@@ -100,8 +91,6 @@
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
-            pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
-                           &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
         } else {                                                        \
             pciesvc_logerror("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore (out of bounds)",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \

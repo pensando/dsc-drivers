@@ -1026,15 +1026,30 @@ void
 pciehw_cfg_reset(pciehwdev_t *phwdev, const pciesvc_rsttype_t rsttype)
 {
     cfgspace_t cs;
-    u_int16_t cfgsz, cmd;
+    u_int16_t cfgsz, cmd, pciecap, devctl, maxpayload;
 
     pciesvc_cfgspace_get(pciehwdev_geth(phwdev), &cs);
     cfgsz = cfgspace_size(&cs);
+
+    /* save maxpayload setting before reset */
+    pciecap = cfgspace_findcap(&cs, PCI_CAP_ID_EXP);
+    if (pciecap) {
+        devctl = cfgspace_readw(&cs, pciecap + PCI_EXP_DEVCTL);
+        maxpayload = devctl & PCI_EXP_DEVCTL_PAYLOAD;
+    }
 
     /*****************
      * reset cfg space
      */
     pciesvc_memcpy_toio(cs.cur, cs.rst, cfgsz);
+
+    /* maxpayload setting preserved across FLR, restore saved value */
+    if (rsttype == PCIESVC_RSTTYPE_FLR && pciecap) {
+        devctl = cfgspace_readw(&cs, pciecap + PCI_EXP_DEVCTL);
+        devctl &= ~PCI_EXP_DEVCTL_PAYLOAD;
+        devctl |= maxpayload;
+        cfgspace_writew(&cs, pciecap + PCI_EXP_DEVCTL, devctl);
+    }
 
     /* Read reset value for cmd */
     cmd = cfgspace_readw(&cs, PCI_COMMAND);
