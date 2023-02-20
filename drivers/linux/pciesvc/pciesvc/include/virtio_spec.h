@@ -69,6 +69,8 @@ typedef struct virtio_pci_common_cfg {
             virtio_pci_feature_cfg_t driver_feature_cfg[VIRTIO_PCI_FEATURE_SELECT_COUNT];
             /* pciemgr observed device status nonzero -> zero */
             uint8_t need_reset;
+	    /* for checking status transitions */
+	    uint8_t device_status_prev;
         };
     };
 } __attribute__((packed)) virtio_pci_common_cfg_t;
@@ -151,6 +153,11 @@ enum {
     VIRTIO_NET_F_RSS_EXT                = (1ull << 61),
     VIRTIO_NET_F_STANDBY                = (1ull << 62),
     VIRTIO_NET_F_SPEED_DUPLEX           = (1ull << 63),
+};
+
+enum {
+    VIRTIO_NET_S_LINK_UP                = 1,  // e.g. BIT(0)
+    VIRTIO_NET_S_ANNOUNCE               = 2,  // e.g. BIT(1)
 };
 
 /* 6 - reserved feature bits */
