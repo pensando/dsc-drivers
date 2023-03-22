@@ -6789,6 +6789,10 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 
 #else
 
+#if RHEL_RELEASE_CODE && RHEL_RELEASE_VERSION(9, 0) < RHEL_RELEASE_CODE
+#define HAVE_COALESCE_EXTACK
+#endif
+
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
 #define HAVE_VOID_DEVLINK_REGISTER
 #endif /* CONFIG_NET_DEVLINK */
@@ -6808,7 +6812,8 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 /*****************************************************************************/
 #if (KERNEL_VERSION(5, 17, 0) > LINUX_VERSION_CODE)
 
-#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 7) <= RHEL_RELEASE_CODE))
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 7) <= RHEL_RELEASE_CODE && \
+			   RHEL_RELEASE_VERSION(9, 0) != RHEL_RELEASE_CODE))
 #define HAVE_RINGPARAM_EXTACK
 #endif
 
