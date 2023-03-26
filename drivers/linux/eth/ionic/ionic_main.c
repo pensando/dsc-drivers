@@ -43,6 +43,10 @@ unsigned long affinity_mask_override;
 module_param(affinity_mask_override, ulong, 0600);
 MODULE_PARM_DESC(affinity_mask_override, "IRQ affinity mask to override (max 64 bits)");
 
+unsigned long asic_addr_len = IONIC_ADDR_LEN;
+module_param(asic_addr_len, ulong, 0600);
+MODULE_PARM_DESC(asic_addr_len, "DMA address bits for mask size");
+
 static const char *ionic_error_to_str(enum ionic_status_code code)
 {
 	switch (code) {
@@ -554,7 +558,8 @@ int ionic_set_dma_mask(struct ionic *ionic)
 #ifdef CONFIG_PPC64
 	ionic->pdev->no_64bit_msi = 1;
 #endif
-	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(IONIC_ADDR_LEN));
+	dev_info(dev, "setting %lu bit DMA mask\n", asic_addr_len);
+	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(asic_addr_len));
 	if (err)
 		dev_err(dev, "Unable to obtain 64-bit DMA for consistent allocations, aborting.  err=%d\n",
 			err);
