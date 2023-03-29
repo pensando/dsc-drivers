@@ -582,11 +582,15 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 	new->q.dev = dev;
 	new->flags = flags;
 
-	new->q.info = vzalloc(num_descs * sizeof(*new->q.info));
+	new->q.info = vzalloc_node(num_descs * sizeof(*new->q.info),
+				   dev_to_node(dev));
 	if (!new->q.info) {
-		netdev_err(lif->netdev, "Cannot allocate queue info\n");
-		err = -ENOMEM;
-		goto err_out_free_qcq;
+		new->q.info = vzalloc(num_descs * sizeof(*new->q.info));
+		if (!new->q.info) {
+			netdev_err(lif->netdev, "Cannot allocate queue info\n");
+			err = -ENOMEM;
+			goto err_out_free_qcq;
+		}
 	}
 
 	new->q.type = type;
@@ -603,11 +607,16 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 	if (err)
 		goto err_out;
 
-	new->cq.info = vzalloc(num_descs * sizeof(*new->cq.info));
+	new->cq.info = vzalloc_node(num_descs * sizeof(*new->cq.info),
+				    dev_to_node(dev));
 	if (!new->cq.info) {
-		netdev_err(lif->netdev, "Cannot allocate completion queue info\n");
-		err = -ENOMEM;
-		goto err_out_free_irq;
+		new->cq.info = vzalloc(num_descs * sizeof(*new->cq.info));
+		if (!new->cq.info) {
+			netdev_err(lif->netdev,
+				   "Cannot allocate completion queue info\n");
+			err = -ENOMEM;
+			goto err_out_free_irq;
+		}
 	}
 
 	err = ionic_cq_init(lif, &new->cq, &new->intr, num_descs, cq_desc_size);
