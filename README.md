@@ -165,3 +165,11 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - Rx/Tx performance tuning
  - fixes imported from upstream driver
  - bug fixes
+
+2023-04-10 - driver update for 23.04.1-001
+ - kcompat updates for RHEL 8.7, Linux v6.2, RHEL 9.x
+ - remove support for event queues
+ - split cmb-rings control to conform to tx-push and rx-push ringparams
+ - code cleaning to better match upstream code
+ - module parameter to set DMA mask at load time
+ - bug fixes

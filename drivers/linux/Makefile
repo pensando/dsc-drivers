@@ -69,7 +69,7 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "22.11.1-001"
+    DVER = "23.04.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
