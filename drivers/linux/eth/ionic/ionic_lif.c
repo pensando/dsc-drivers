@@ -804,7 +804,6 @@ static void ionic_qcq_sanitize(struct ionic_qcq *qcq)
 	qcq->q.head_idx = 0;
 	qcq->cq.tail_idx = 0;
 	qcq->cq.done_color = 1;
-
 	memset(qcq->q_base, 0, qcq->q_size);
 	if (qcq->cmb_q_base)
 		memset_io(qcq->cmb_q_base, 0, qcq->cmb_q_size);
@@ -2361,12 +2360,6 @@ static int ionic_open(struct net_device *netdev)
 	struct ionic_lif *lif = netdev_priv(netdev);
 	int err;
 
-	if (test_bit(IONIC_LIF_F_UP, lif->state)) {
-		dev_dbg(lif->ionic->dev, "%s: %s called when state=UP\n",
-			__func__, lif->name);
-		return 0;
-	}
-
 	/* If recovering from a broken state, clear the bit and we'll try again */
 	if (test_and_clear_bit(IONIC_LIF_F_BROKEN, lif->state))
 		netdev_info(netdev, "clearing broken state\n");
@@ -3428,7 +3421,7 @@ static void ionic_lif_reset(struct ionic_lif *lif)
 
 	mutex_lock(&lif->ionic->dev_cmd_lock);
 	ionic_dev_cmd_lif_reset(idev, lif->index);
-	ionic_dev_cmd_wait(lif->ionic, devcmd_timeout);
+	ionic_dev_cmd_wait(lif->ionic, DEVCMD_TIMEOUT);
 	mutex_unlock(&lif->ionic->dev_cmd_lock);
 }
 
@@ -3621,7 +3614,7 @@ static int ionic_lif_adminq_init(struct ionic_lif *lif)
 
 	mutex_lock(&lif->ionic->dev_cmd_lock);
 	ionic_dev_cmd_adminq_init(idev, qcq, lif->index, qcq->intr.index);
-	err = ionic_dev_cmd_wait(lif->ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(lif->ionic, DEVCMD_TIMEOUT);
 	ionic_dev_cmd_comp(idev, (union ionic_dev_cmd_comp *)&comp);
 	mutex_unlock(&lif->ionic->dev_cmd_lock);
 	if (err) {
@@ -3738,7 +3731,7 @@ static int ionic_station_set(struct ionic_lif *lif)
 			return err;
 
 		if (err > 0) {
-			netdev_dbg(netdev, "%s:SET/GET ATTR Mac is not same-due to old FW running\n",
+			netdev_dbg(netdev, "%s:SET/GET ATTR Mac are not same-due to old FW running\n",
 				   __func__);
 			return 0;
 		}
@@ -3783,7 +3776,7 @@ int ionic_lif_init(struct ionic_lif *lif)
 
 	mutex_lock(&lif->ionic->dev_cmd_lock);
 	ionic_dev_cmd_lif_init(idev, lif->index, lif->info_pa);
-	err = ionic_dev_cmd_wait(lif->ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(lif->ionic, DEVCMD_TIMEOUT);
 	ionic_dev_cmd_comp(idev, (union ionic_dev_cmd_comp *)&comp);
 	mutex_unlock(&lif->ionic->dev_cmd_lock);
 	if (err)
@@ -3988,7 +3981,7 @@ static void ionic_lif_queue_identify(struct ionic_lif *lif)
 		mutex_lock(&ionic->dev_cmd_lock);
 		ionic_dev_cmd_queue_identify(idev, lif->lif_type, qtype,
 					     ionic_qtype_versions[qtype]);
-		err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+		err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 		if (!err) {
 			qti->version   = ioread8(&q_ident->version);
 			qti->supported = ioread8(&q_ident->supported);
@@ -4043,7 +4036,7 @@ int ionic_lif_identify(struct ionic *ionic, u8 lif_type,
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_lif_identify(idev, lif_type, IONIC_IDENTITY_VERSION_1);
-	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 	memcpy_fromio(lid, &idev->dev_cmd_regs->data, sz);
 	mutex_unlock(&ionic->dev_cmd_lock);
 	if (err)
@@ -4137,7 +4130,7 @@ int ionic_lif_size(struct ionic *ionic)
 
 	/* interrupt usage:
 	 *    1 for master lif adminq/notifyq
-	 *    1 for each CPU for master lif TxRx queues
+	 *    1 for each CPU for master lif TxRx queue pairs
 	 *    whatever's left is for RDMA queues
 	 */
 try_again:

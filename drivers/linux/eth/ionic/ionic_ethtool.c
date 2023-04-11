@@ -377,7 +377,7 @@ static int ionic_set_link_ksettings(struct net_device *netdev,
 	if (ks->base.autoneg != idev->port_info->config.an_enable) {
 		mutex_lock(&ionic->dev_cmd_lock);
 		ionic_dev_cmd_port_autoneg(idev, ks->base.autoneg);
-		err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+		err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 		mutex_unlock(&ionic->dev_cmd_lock);
 		if (err)
 			return err;
@@ -387,7 +387,7 @@ static int ionic_set_link_ksettings(struct net_device *netdev,
 	if (ks->base.speed != le32_to_cpu(idev->port_info->config.speed)) {
 		mutex_lock(&ionic->dev_cmd_lock);
 		ionic_dev_cmd_port_speed(idev, ks->base.speed);
-		err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+		err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 		mutex_unlock(&ionic->dev_cmd_lock);
 		if (err)
 			return err;
@@ -437,7 +437,7 @@ static int ionic_set_pauseparam(struct net_device *netdev,
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_port_pause(&lif->ionic->idev, requested_pause);
-	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 	mutex_unlock(&ionic->dev_cmd_lock);
 	if (err)
 		return err;
@@ -522,7 +522,7 @@ static int ionic_set_fecparam(struct net_device *netdev,
 	if (fec_type != lif->ionic->idev.port_info->config.fec_type) {
 		mutex_lock(&lif->ionic->dev_cmd_lock);
 		ionic_dev_cmd_port_fec(&lif->ionic->idev, fec_type);
-		ret = ionic_dev_cmd_wait(lif->ionic, devcmd_timeout);
+		ret = ionic_dev_cmd_wait(lif->ionic, DEVCMD_TIMEOUT);
 		mutex_unlock(&lif->ionic->dev_cmd_lock);
 	}
 
@@ -1274,11 +1274,11 @@ static int ionic_nway_reset(struct net_device *netdev)
 	mutex_lock(&ionic->dev_cmd_lock);
 
 	ionic_dev_cmd_port_state(&ionic->idev, IONIC_PORT_ADMIN_STATE_DOWN);
-	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 
 	if (!err) {
 		ionic_dev_cmd_port_state(&ionic->idev, IONIC_PORT_ADMIN_STATE_UP);
-		err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+		err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 	}
 
 	mutex_unlock(&ionic->dev_cmd_lock);

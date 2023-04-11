@@ -22,7 +22,8 @@ struct ionic_lif;
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_VF	0x1003
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_MGMT	0x1004
 
-#define DEVCMD_TIMEOUT  5
+#define DEVCMD_TOUT_DEF 5
+#define DEVCMD_TIMEOUT  devcmd_timeout
 #define SHORT_TIMEOUT   1
 #define IONIC_ADMINQ_TIME_SLICE	msecs_to_jiffies(100)
 

@@ -282,11 +282,11 @@ do_check_time:
 		return -ENXIO;
 
 	/* Because of some variability in the actual FW heartbeat, we
-	 * wait longer than the current devcmd_timeout before checking
+	 * wait longer than the current DEVCMD_TIMEOUT before checking
 	 * again, but never less than 5 seconds.
 	 */
 	last_check_time = idev->last_hb_time;
-	wt = max_t(int, (devcmd_timeout * 2), DEVCMD_TIMEOUT);
+	wt = max_t(int, (DEVCMD_TIMEOUT * 2), DEVCMD_TOUT_DEF);
 	if (time_before(check_time, last_check_time + wt * HZ))
 		return 0;
 
@@ -481,7 +481,7 @@ int ionic_set_vf_config(struct ionic *ionic, int vf,
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_go(&ionic->idev, &cmd);
-	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 	mutex_unlock(&ionic->dev_cmd_lock);
 
 	return err;
@@ -515,7 +515,7 @@ int ionic_dev_cmd_vf_getattr(struct ionic *ionic, int vf, u8 attr,
 
 	mutex_lock(&ionic->dev_cmd_lock);
 	ionic_dev_cmd_go(&ionic->idev, &cmd);
-	err = ionic_dev_cmd_wait_nomsg(ionic, devcmd_timeout);
+	err = ionic_dev_cmd_wait_nomsg(ionic, DEVCMD_TIMEOUT);
 	memcpy_fromio(comp, &ionic->idev.dev_cmd_regs->comp.vf_getattr,
 		      sizeof(*comp));
 	mutex_unlock(&ionic->dev_cmd_lock);
@@ -545,7 +545,7 @@ void ionic_vf_start(struct ionic *ionic, int vf)
 	}
 
 	ionic_dev_cmd_go(&ionic->idev, &cmd);
-	ionic_dev_cmd_wait(ionic, devcmd_timeout);
+	ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
 #endif
 }
 
