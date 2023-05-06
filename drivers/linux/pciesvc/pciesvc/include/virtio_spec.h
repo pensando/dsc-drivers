@@ -69,8 +69,8 @@ typedef struct virtio_pci_common_cfg {
             virtio_pci_feature_cfg_t driver_feature_cfg[VIRTIO_PCI_FEATURE_SELECT_COUNT];
             /* pciemgr observed device status nonzero -> zero */
             uint8_t need_reset;
-	    /* for checking status transitions */
-	    uint8_t device_status_prev;
+            /* for checking status transitions */
+            uint8_t device_status_prev;
         };
     };
 } __attribute__((packed)) virtio_pci_common_cfg_t;
@@ -111,6 +111,31 @@ typedef struct virtio_net_config {
     /* bitmask of supported VIRTIO_NET_RSS_HASH_ types */
     uint32_t supported_hash_types;
 } __attribute__((packed)) virtio_net_config_t;
+
+/* 4.1.4.10 legacy config - for transitional device support */
+typedef struct virtio_msix_legacy_cfg {
+        uint16_t            config_msix_vector; // indirect
+        uint16_t            queue_msix_vector;  // indirect
+} __attribute__((packed)) virtio_msix_legacy_cfg_t;
+
+typedef struct virtio_pci_legacy_cfg {
+    virtio_pci_feature_cfg_t    device_feature; // indirect
+    virtio_pci_feature_cfg_t    driver_feature; // indirect
+    uint32_t                    queue_address;
+    uint16_t                    queue_size;     // indirect
+    uint16_t                    queue_select;
+    uint16_t                    queue_notify;
+    uint8_t                     device_status;  // indirect
+    uint8_t                     isr_status;     // indirect
+    union {
+        /* XXX - net_cfg shifts when MSI-X is enabled or disabled! */
+        virtio_net_config_t     net_cfg;        // indirect
+        struct {
+            virtio_msix_legacy_cfg_t msix_cfg;  // indirect
+            virtio_net_config_t net_cfg_msix;   // indirect
+        };
+    };
+} __attribute__((packed)) virtio_pci_legacy_cfg_t;
 
 /* 2.1 - device status field */
 enum {
@@ -203,27 +228,34 @@ struct virtio_ident_reg {
     uint16_t min_qlen;
 };
 
+/* The legacy registers must start at 0; everything else is discoverable
+ * via PCI_CAPs
+ */
 struct virtio_dev_regs {
     union {
-        struct virtio_pci_common_cfg cmn_cfg;
+        struct virtio_pci_legacy_cfg legacy_cfg;
         uint8_t part0[256];
+    };
+    union {
+        struct virtio_pci_common_cfg cmn_cfg;
+        uint8_t part1[256];
     };
     union {
         struct virtio_net_config net_cfg;
         uint8_t dev_cfg[256];
-        uint8_t part1[256];
+        uint8_t part2[256];
     };
     union {
         struct virtio_ident_reg ident;
-        uint8_t part2[512];
+        uint8_t part3[256];
     };
     union {
         struct virtio_pci_notify_reg notify_reg;
-        uint8_t part3[1024];
+        uint8_t part4[1024];
     };
     union {
         uint8_t isr_cfg[2048];
-        uint8_t part4[2048];
+        uint8_t part5[2048];
     };
     /* indirect queue configs */
     struct virtio_pci_queue_cfg queue_cfg[VIRTIO_PCI_QUEUE_SELECT_COUNT];

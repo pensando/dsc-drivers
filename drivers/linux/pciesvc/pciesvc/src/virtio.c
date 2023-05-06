@@ -8,9 +8,7 @@
 
 #include "virtio_spec.h"
 
-#define FMT64X  "0x%" PRIx64
-#define FMT64U "%" PRIu64
-#define FMT64S "%lu"
+#define VIRTIO_LOG_FMT "addr 0x%"PRIx64" off %"PRIu64" size %lu val 0x%"PRIx64
 
 #define VIRTIO_DEV_REG_NOTIFY(fld)                                      \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
@@ -20,9 +18,16 @@
 #define VIRTIO_DEV_REG_RD(fld)                                          \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
         pciesvc_mem_rd(addr, &val, VIRTIO_DEV_REG_SZ(fld));             \
-        pciesvc_logdebug("%s: read %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"", \
+        pciesvc_logdebug("%s: read %s "VIRTIO_LOG_FMT"",                \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         break;
+
+#define VIRTIO_DEV_REG_RD_PROC(fld, proc)                               \
+        case VIRTIO_DEV_REG_OFF(fld):                                   \
+            proc(phwdev, addr - baroff, size, &val);                    \
+            pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT" proc %s",   \
+                pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, #proc);  \
+            break;
 
 #define VIRTIO_DEV_REG_RD_ARR(fld, arr_fld, idx_fld, idx_count)         \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
@@ -31,35 +36,35 @@
         if (idx < idx_count) {                                          \
             pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
                            &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
-            pciesvc_logdebug("%s: read %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+            pciesvc_logdebug("%s: read %s[%"PRIu64"] "VIRTIO_LOG_FMT"", \
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
         } else {                                                        \
-            pciesvc_logerror("%s: read %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" (out of bounds)",\
+            pciesvc_logdebug("%s: read %s[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
         }                                                               \
         break;
 
-#define VIRTIO_DEV_REG_WR(fld)                               \
+#define VIRTIO_DEV_REG_WR(fld)                                          \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+        pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT"",               \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(fld));             \
         break;
 
 #define VIRTIO_DEV_REG_WR_PROC(fld, proc)                               \
-        case VIRTIO_DEV_REG_OFF(fld):                                              \
-            pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" proc %s", \
+        case VIRTIO_DEV_REG_OFF(fld):                                   \
+            pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT" proc %s",   \
                 pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, #proc);  \
-            proc(phwdev, addr, baroff, size, val);                                 \
+            proc(phwdev, addr - baroff, size, val);                     \
             break;
 
-#define VIRTIO_DEV_REG_WR_IGN(fld)                           \
+#define VIRTIO_DEV_REG_WR_IGN(fld)                                      \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore",\
+        pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT" ignore",        \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         break;
 
@@ -68,31 +73,14 @@
         pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, idx_fld),              \
                        &idx, VIRTIO_DEV_REG_SZ(idx_fld));               \
         if (idx < idx_count) {                                          \
-            pciesvc_logdebug("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+            pciesvc_logdebug("%s: write %s[%"PRIu64"] "VIRTIO_LOG_FMT"",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
             pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
                            &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
         } else {                                                        \
-            pciesvc_logerror("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" (out of bounds)",\
-                             pciehwdev_get_name(phwdev), #fld, idx,     \
-                             VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
-                             baroff, size, val);                        \
-        }                                                               \
-        break;
-
-#define VIRTIO_DEV_REG_WR_ARR_IGN(fld, arr_fld, idx_fld, idx_count)     \
-    case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, idx_fld),              \
-                       &idx, VIRTIO_DEV_REG_SZ(idx_fld));               \
-        if (idx < idx_count) {                                          \
-            pciesvc_logdebug("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore",\
-                             pciehwdev_get_name(phwdev), #fld, idx,     \
-                             VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
-                             baroff, size, val);                        \
-        } else {                                                        \
-            pciesvc_logerror("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore (out of bounds)",\
+            pciesvc_logdebug("%s: write %s[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
@@ -103,6 +91,108 @@
         (_offs >= VIRTIO_DEV_REG_OFF(_fld) &&                           \
          (_offs + _sz) <= VIRTIO_DEV_REG_OFF(_fld) + VIRTIO_DEV_REG_SZ(_fld))
 
+
+static void
+virtio_legacy_barrd_isr_status(pciehwdev_t *phwdev, const u_int64_t base,
+                               const size_t size, u_int64_t *val)
+{
+    u_int8_t isr_reset = 0;
+
+    // TODO - first entry in isr_cfg region? Or somewhere else?
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, isr_cfg), val, 1);
+
+    // clear-on-read
+    if (*val) {
+        pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, isr_cfg), &isr_reset, 1);
+    }
+}
+
+static u_int64_t
+virtio_legacy_barrd(pciehwdev_t *phwdev, u_int64_t addr,
+                    const u_int64_t baroff, const size_t size,
+                    u_int8_t *do_notify)
+{
+    u_int64_t base = addr - baroff;
+    u_int64_t val = 0;
+    u_int64_t idx = 0;
+    u_int64_t offset;
+
+    /* net_cfg */
+    if (phwdev->msix_en) {
+        if (VIRTIO_DEV_REG_INSIDE(legacy_cfg.net_cfg_msix, baroff, size)) {
+            offset = baroff - VIRTIO_DEV_REG_OFF(legacy_cfg.net_cfg_msix);
+            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, net_cfg) + offset, &val, size);
+            return val;
+        }
+    } else {
+        if (VIRTIO_DEV_REG_INSIDE(legacy_cfg.net_cfg, baroff, size)) {
+            offset = baroff - VIRTIO_DEV_REG_OFF(legacy_cfg.net_cfg);
+            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, net_cfg) + offset, &val, size);
+            return val;
+        }
+    }
+
+    /* msi-x */
+    if (phwdev->msix_en &&
+        VIRTIO_DEV_REG_INSIDE(legacy_cfg.msix_cfg, baroff, size)) {
+        switch (baroff) {
+        // Indirect scalar
+        case VIRTIO_DEV_REG_OFF(legacy_cfg.msix_cfg.config_msix_vector):
+            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.config_msix_vector),
+                           &val, VIRTIO_DEV_REG_SZ(cmn_cfg.config_msix_vector));
+            break;
+
+        VIRTIO_DEV_REG_RD_ARR(legacy_cfg.msix_cfg.queue_msix_vector,
+                              queue_cfg[idx].queue_msix_vector,
+                              legacy_cfg.queue_select,
+                              VIRTIO_PCI_QUEUE_SELECT_COUNT);
+        default:
+                break;
+        }
+
+        return val;
+    }
+
+    switch (baroff) {
+    // NB - select is always 0 in legacy case
+    VIRTIO_DEV_REG_RD_ARR(legacy_cfg.device_feature,
+                          cmn_cfg.device_feature_cfg[idx],
+                          cmn_cfg.device_feature_select, 1);
+
+    // NB - select is always 0 in legacy case
+    VIRTIO_DEV_REG_RD_ARR(legacy_cfg.driver_feature,
+                          cmn_cfg.driver_feature_cfg[idx],
+                          cmn_cfg.driver_feature_select, 1);
+
+    VIRTIO_DEV_REG_RD_ARR(legacy_cfg.queue_address,
+                          queue_cfg[idx].queue_desc_lo,
+                          legacy_cfg.queue_select,
+                          VIRTIO_PCI_QUEUE_SELECT_COUNT);
+
+    VIRTIO_DEV_REG_RD_ARR(legacy_cfg.queue_size,
+                          queue_cfg[idx].queue_size,
+                          legacy_cfg.queue_select,
+                          VIRTIO_PCI_QUEUE_SELECT_COUNT);
+
+    VIRTIO_DEV_REG_RD(legacy_cfg.queue_select);
+
+    VIRTIO_DEV_REG_RD(legacy_cfg.queue_notify);
+
+    // Indirect scalar
+    case VIRTIO_DEV_REG_OFF(legacy_cfg.device_status):
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status),
+                       &val, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+        break;
+
+    VIRTIO_DEV_REG_RD_PROC(legacy_cfg.isr_status,
+                           virtio_legacy_barrd_isr_status);
+    default:
+            break;
+    }
+
+    return val;
+}
+
 u_int64_t
 virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
              const u_int64_t baroff, const size_t size,
@@ -112,11 +202,26 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
     u_int64_t val = 0;
     u_int64_t idx = 0;
 
+    /* legacy_cfg */
+    if (VIRTIO_DEV_REG_INSIDE(part0, baroff, size)) {
+        val = virtio_legacy_barrd(phwdev, addr, baroff, size, do_notify);
+        pciesvc_logerror("%s: read part0 "VIRTIO_LOG_FMT"",
+                         pciehwdev_get_name(phwdev), addr, baroff, size, val);
+        return val;
+    }
+
     /* net_cfg */
-    if (VIRTIO_DEV_REG_INSIDE(part1, baroff, size)) {
+    if (VIRTIO_DEV_REG_INSIDE(part2, baroff, size)) {
         pciesvc_mem_rd(addr, &val, size);
-        pciesvc_logdebug("%s: read part1 addr "FMT64X" "
-                         "off "FMT64U" size "FMT64S" val "FMT64X"",
+        pciesvc_logdebug("%s: read part2 "VIRTIO_LOG_FMT"",
+                         pciehwdev_get_name(phwdev), addr, baroff, size, val);
+        return val;
+    }
+
+    /* isr_cfg */
+    if (VIRTIO_DEV_REG_INSIDE(part5, baroff, size)) {
+        val = 0;
+        pciesvc_logdebug("%s: read part5 "VIRTIO_LOG_FMT"",
                          pciehwdev_get_name(phwdev), addr, baroff, size, val);
         return val;
     }
@@ -194,8 +299,8 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
 
     default:
         val = 0;
-        pciesvc_logerror("%s: read addr "FMT64X" off "FMT64U" size "FMT64S" default ignore",
-            pciehwdev_get_name(phwdev), addr, baroff, size);
+        pciesvc_logdebug("%s: read "VIRTIO_LOG_FMT" default ignore",
+                         pciehwdev_get_name(phwdev), addr, baroff, size, val);
         break;
     }
 
@@ -203,14 +308,13 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
 }
 
 static void
-virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
-                           const u_int64_t baroff, const size_t size,
-                           const u_int64_t val)
+virtio_barwr_device_status(pciehwdev_t *phwdev, const u_int64_t base,
+                           const size_t size, const u_int64_t val)
 {
-    u_int64_t base = addr - baroff;
     u_int8_t old = 0;
 
-    pciesvc_mem_rd(addr, &old, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status),
+                   &old, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
 
     if (!val) {
         // If pciemgr sees the transition nonzero -> zero, then nicmgr needs to
@@ -244,6 +348,9 @@ virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
         return;
     }
 
+    // FEATURES_OK is only defined for version 1, so this is not entered
+    // for legacy devices. As long as we're only checking for feature bits
+    // above 32 this will be fine.
     if ((val & VIRTIO_S_FEATURES_OK) && !(old & VIRTIO_S_FEATURES_OK)) {
         u_int32_t feature_lo = 0;
         u_int32_t feature_hi = 0;
@@ -257,8 +364,9 @@ virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
 
         feature = (u_int64_t)feature_lo | ((u_int64_t)feature_hi << 32);
 
-        pciesvc_loginfo("proc: features_ok "FMT64X"", feature);
+        pciesvc_loginfo("proc: features_ok 0x%"PRIx64"", feature);
 
+	// VIRTIO_F_NOTIFICATION_DATA is bit 38
         if (feature & VIRTIO_F_NOTIFICATION_DATA) {
             // Nicmgr initialized the queue configs with notify offsets in
             // the incr_pi_dbell range.  If this feature is selected,
@@ -294,7 +402,162 @@ virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
         }
     }
 
-    pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+    pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status), &val,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+}
+
+static void
+virtio_barwr_driver_feature(pciehwdev_t *phwdev, const u_int64_t base,
+                            const size_t size, const u_int64_t val)
+{
+    u_int64_t reg_addr, reg_size;
+    u_int64_t idx = 0;
+    u_int8_t status = 0;
+
+    // Verify that device is in the correct state
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status), &status,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+
+    if (status & VIRTIO_S_FEATURES_OK) {
+        pciesvc_logdebug("proc: ignoring late features write");
+        return;
+    }
+
+    // NB - select is always 0 in legacy case
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_select),
+                   &idx,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_select));
+
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[idx]);
+    reg_size = VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_cfg[idx]);
+
+    if (idx < VIRTIO_PCI_FEATURE_SELECT_COUNT) {
+        pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT"",
+                         pciehwdev_get_name(phwdev), idx, reg_addr,
+                         reg_addr - base, size, val);
+        // Actually perform the requested write
+        pciesvc_mem_wr(reg_addr, &val, reg_size);
+    } else {
+        pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",
+                         pciehwdev_get_name(phwdev), idx, reg_addr,
+                         reg_addr - base, size, val);
+    }
+}
+
+// 2.7.2 The driver writes a single address pointing to the beginning of
+// struct vring; from there the device calculates the rest of the addresses.
+// NB: The queue_address is only 44 bits (32 bits * 4096)
+static void
+virtio_legacy_barwr_queue_address(pciehwdev_t *phwdev, const u_int64_t base,
+                                  const size_t size, const u_int64_t val)
+{
+    u_int64_t idx = 0;
+    u_int64_t reg_addr = VIRTIO_DEV_REG_ADDR(base, legacy_cfg.queue_address);
+    size_t reg_size = VIRTIO_DEV_REG_SZ(queue_cfg[idx].queue_desc_lo);
+    u_int64_t vq_addr = val << 12;
+    u_int64_t vq_addr_hi;
+    u_int64_t vq_size = 0;
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, legacy_cfg.queue_select),
+                   &idx, VIRTIO_DEV_REG_SZ(legacy_cfg.queue_select));
+
+    if (idx >= VIRTIO_PCI_QUEUE_SELECT_COUNT) {
+        pciesvc_logdebug("%s: write legacy_cfg.queue_address[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",
+                         pciehwdev_get_name(phwdev), idx, reg_addr,
+                         reg_addr - base, reg_size, val);
+        return;
+    }
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_size),
+                   &vq_size, VIRTIO_DEV_REG_SZ(queue_cfg[idx].queue_size));
+
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_desc_lo);
+    pciesvc_mem_wr(reg_addr, &vq_addr, reg_size);
+
+    vq_addr_hi = vq_addr >> 32;
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_desc_hi);
+    pciesvc_mem_wr(reg_addr, &vq_addr_hi, reg_size);
+
+    vq_addr += (16 * vq_size); /* sizeof(struct vring_desc) */
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_avail_lo);
+    pciesvc_mem_wr(reg_addr, &vq_addr, reg_size);
+
+    vq_addr_hi = vq_addr >> 32;
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_avail_hi);
+    pciesvc_mem_wr(reg_addr, &vq_addr_hi, reg_size);
+
+    vq_addr += (4 + 2 * vq_size + 2); /* sizeof(struct vring_avail) */
+    vq_addr = align_to(vq_addr, 4096);
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_used_lo);
+    pciesvc_mem_wr(reg_addr, &vq_addr, reg_size);
+
+    vq_addr_hi = vq_addr >> 32;
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, queue_cfg[idx].queue_used_hi);
+    pciesvc_mem_wr(reg_addr, &vq_addr_hi, reg_size);
+}
+
+static void
+virtio_legacy_barwr(pciehwdev_t *phwdev, u_int64_t addr,
+                    const u_int64_t baroff, const size_t size,
+                    const u_int64_t val, u_int8_t *do_notify)
+{
+    u_int64_t base = addr - baroff;
+    u_int64_t idx = 0;
+
+    /* msi-x */
+    if (phwdev->msix_en &&
+        VIRTIO_DEV_REG_INSIDE(legacy_cfg.msix_cfg, baroff, size)) {
+        switch (baroff) {
+        // Indirect scalar
+        case VIRTIO_DEV_REG_OFF(legacy_cfg.msix_cfg.config_msix_vector):
+            pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.config_msix_vector),
+                           &val, VIRTIO_DEV_REG_SZ(cmn_cfg.config_msix_vector));
+            break;
+
+        VIRTIO_DEV_REG_WR_ARR(legacy_cfg.msix_cfg.queue_msix_vector,
+                              queue_cfg[idx].queue_msix_vector,
+                              legacy_cfg.queue_select,
+                              VIRTIO_PCI_QUEUE_SELECT_COUNT);
+        default:
+            break;
+        }
+
+        return;
+    }
+
+    switch (baroff) {
+    VIRTIO_DEV_REG_WR_IGN(legacy_cfg.device_feature);
+
+    VIRTIO_DEV_REG_WR_PROC(legacy_cfg.driver_feature,
+                           virtio_barwr_driver_feature);
+
+    VIRTIO_DEV_REG_WR_PROC(legacy_cfg.queue_address,
+                           virtio_legacy_barwr_queue_address);
+
+    VIRTIO_DEV_REG_WR_IGN(legacy_cfg.queue_size);
+
+    VIRTIO_DEV_REG_WR(legacy_cfg.queue_select);
+
+    VIRTIO_DEV_REG_WR(legacy_cfg.queue_notify);
+
+    VIRTIO_DEV_REG_WR_PROC(legacy_cfg.device_status,
+                           virtio_barwr_device_status);
+
+    VIRTIO_DEV_REG_WR_IGN(legacy_cfg.isr_status);
+
+    default:
+        pciesvc_logdebug("%s: write "VIRTIO_LOG_FMT" default ignore",
+            pciehwdev_get_name(phwdev), addr, baroff, size, val);
+        break;
+    }
+
+    switch (baroff) {
+    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.device_status);
+    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.driver_feature);
+    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_select);
+    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_address); // enable
+    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_notify);
+    }
 }
 
 void
@@ -305,20 +568,23 @@ virtio_barwr(pciehwdev_t *phwdev, u_int64_t addr,
     u_int64_t base = addr - baroff;
     u_int64_t idx = 0;
 
+    /* legacy_cfg */
+    if (VIRTIO_DEV_REG_INSIDE(part0, baroff, size)) {
+        virtio_legacy_barwr(phwdev, addr, baroff, size, val, do_notify);
+        pciesvc_logerror("%s: write part0 "VIRTIO_LOG_FMT"",
+                         pciehwdev_get_name(phwdev), addr, baroff, size, val);
+        return;
+    }
+
     switch (baroff) {
     VIRTIO_DEV_REG_WR(cmn_cfg.device_feature_select);
 
-    VIRTIO_DEV_REG_WR_ARR_IGN(cmn_cfg.device_feature,
-                              cmn_cfg.device_feature_cfg[idx],
-                              cmn_cfg.device_feature_select,
-                              VIRTIO_PCI_FEATURE_SELECT_COUNT);
+    VIRTIO_DEV_REG_WR_IGN(cmn_cfg.device_feature);
 
     VIRTIO_DEV_REG_WR(cmn_cfg.driver_feature_select);
 
-    VIRTIO_DEV_REG_WR_ARR(cmn_cfg.driver_feature,
-                          cmn_cfg.driver_feature_cfg[idx],
-                          cmn_cfg.driver_feature_select,
-                          VIRTIO_PCI_FEATURE_SELECT_COUNT);
+    VIRTIO_DEV_REG_WR_PROC(cmn_cfg.driver_feature,
+                           virtio_barwr_driver_feature);
 
     VIRTIO_DEV_REG_WR(cmn_cfg.config_msix_vector);
     VIRTIO_DEV_REG_WR_IGN(cmn_cfg.num_queues);
@@ -377,7 +643,7 @@ virtio_barwr(pciehwdev_t *phwdev, u_int64_t addr,
                           VIRTIO_PCI_QUEUE_SELECT_COUNT);
 
     default:
-        pciesvc_logerror("%s: write addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" default ignore",
+        pciesvc_logdebug("%s: write "VIRTIO_LOG_FMT" default ignore",
             pciehwdev_get_name(phwdev), addr, baroff, size, val);
         break;
     }

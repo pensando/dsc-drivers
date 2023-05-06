@@ -531,6 +531,7 @@ pciehw_cfgwr_msix(const handler_ctx_t *hctx)
     msix_mask = (msixctl & PCI_MSIX_FLAGS_MASKALL) != 0;
 
     phwdev = pciehwdev_get(hctx->hwdevh);
+    phwdev->msix_en = msix_en;
 
     if (msix_en) {
         /* msix mode */
