@@ -94,6 +94,7 @@ typedef union pciehwdev_u {
         u_int16_t pf:1;                 /* is pf */
         u_int16_t vf:1;                 /* is vf */
         u_int16_t flexvf:1;             /* is flexvf */
+        u_int16_t msix_en:1;            /* msix enabled for this dev */
         u_int16_t totalvfs;             /* totalvfs provisioned */
         u_int16_t numvfs;               /* current numvfs */
         u_int16_t vfidx;                /* if is vf, vf position */

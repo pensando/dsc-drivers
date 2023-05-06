@@ -57,9 +57,13 @@ prt_alloc(const int n)
 void
 prt_free(const int prtb, const int prtc)
 {
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+
     assert_prts_in_range(prtb, prtc);
 
-    if (prtc == PRT_SLAB_SIZE) {
+    if ((prtb + prtc) ==  pshmem->allocprt) {
+        pshmem->allocprt -= prtc;
+    } else if (prtc == PRT_SLAB_SIZE) {
         pciehw_shmem_t *pshmem = pciesvc_shmem_get();
         pciehw_sprt_t *sprt;
 
@@ -68,7 +72,8 @@ prt_free(const int prtb, const int prtc)
         pciesvc_sprt_put(sprt, DIRTY);
         pshmem->freeprt_slab = prtb;
     } else {
-        /* XXX */
+        pciesvc_logerror("prt_free: leak prt %d (%d), allocprt %d\n",
+                          prtb, prtc, pshmem->allocprt);
     }
 }
 
