@@ -148,8 +148,10 @@ pmt_alloc(const int n, const int pri)
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
     int pmti = -1;
 
-    pciesvc_assert(n > 0);
-    pciesvc_assert(n <= pmt_count());
+    if (n <= 0 || n > pmt_count()) {
+        pciesvc_logerror("pmt_alloc: Invalid count value %d\n", n);
+        return -1;
+    }
 
     if (!pshmem->pmtpri) {
         pshmem->allocpmt_low = pmt_count();
@@ -188,20 +190,24 @@ int
 pmt_reserve_vf0adj(const int n)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+    int ret = 0;
 
-    pshmem->allocpmt_vf0adj = pmt_alloc(n, PMTPRI_LOW);
+    ret = pmt_alloc(n, PMTPRI_LOW);
+    if (ret < 0) return ret;
+    pshmem->allocpmt_vf0adj = ret;
     return pshmem->allocpmt_vf0adj;
 }
 
 static int
-pmt_to_pri(const int pmti)
+pmt_to_pri(const int pmtb, const int pmtc)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
     int pmtpri = -1;
+    int pmti = pmtb + pmtc;
 
-    if (pmti >= 0 && pmti <= pshmem->allocpmt_high) {
+    if (pmtb >= 0 && pmti <= pshmem->allocpmt_high) {
         pmtpri = PMTPRI_HIGH;
-    } else if (pmti >= pshmem->allocpmt_low && pmti < pmt_count()) {
+    } else if (pmtb >= pshmem->allocpmt_low && pmti <= pmt_count()) {
         pmtpri = PMTPRI_LOW;
     }
     return pmtpri;
@@ -219,20 +225,29 @@ pmt_free(const int pmtb, const int pmtc)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
     pciehw_spmt_t *spmt;
-    int pmti;
+    int pmti, pmtpri;
 
     assert_pmts_in_range(pmtb, pmtc);
 
-    if (pmt_to_pri(pmtb + pmtc) == PMTPRI_HIGH) {
+    pmtpri = pmt_to_pri(pmtb, pmtc);
+    if (pmtpri == PMTPRI_HIGH) {
         /* free high pri */
+        if (pshmem->allocpmt_high == (pmtb + pmtc)) {
+            pshmem->allocpmt_high -= pmtc;
+            return;
+        }
         for (pmti = pmtb; pmti < pmtb + pmtc; pmti++) {
             spmt = pciesvc_spmt_get(pmti);
             spmt->next = pshmem->freepmt_high;
             pciesvc_spmt_put(spmt, DIRTY);
             pshmem->freepmt_high = pmti;
         }
-    } else if (pmt_to_pri(pmtb) == PMTPRI_LOW) {
+    } else if (pmtpri == PMTPRI_LOW) {
         /* free low pri */
+        if (pshmem->allocpmt_low == pmtb) {
+            pshmem->allocpmt_low += pmtc;
+            return;
+        }
         for (pmti = pmtb; pmti < pmtb + pmtc; pmti++) {
             spmt = pciesvc_spmt_get(pmti);
             spmt->next = pshmem->freepmt_low;
@@ -907,6 +922,8 @@ pciehw_pmt_adjust_vf0(pciehw_spmt_t *spmt,
                 r = -1;
                 break;
             }
+            /* set owner to adjusted vf dev */
+            nspmt->owner = spmt->owner + nvfs;
             spmt = nspmt;
         }
     }
