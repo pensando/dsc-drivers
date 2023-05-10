@@ -304,6 +304,12 @@ rounddn_power2(u_int64_t n)
     return roundup_power2(n + 1) >> 1;
 }
 
+static inline u_int64_t
+align_to(u_int64_t n, u_int64_t align)
+{
+	return (n + align - 1) & ~(align - 1);
+}
+
 #ifdef __cplusplus
 }
 #endif
