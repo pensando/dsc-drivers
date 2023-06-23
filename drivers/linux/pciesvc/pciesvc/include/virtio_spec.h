@@ -66,11 +66,17 @@ typedef struct virtio_pci_common_cfg {
         /* indirect features are hidden behind unused queue_cfg */
         struct {
             virtio_pci_feature_cfg_t device_feature_cfg[VIRTIO_PCI_FEATURE_SELECT_COUNT];
-            virtio_pci_feature_cfg_t driver_feature_cfg[VIRTIO_PCI_FEATURE_SELECT_COUNT];
+            union {
+                virtio_pci_feature_cfg_t driver_feature_cfg[VIRTIO_PCI_FEATURE_SELECT_COUNT];
+                /* source of truth for nicmgr feature checks */
+                uint64_t active_features;
+            };
             /* pciemgr observed device status nonzero -> zero */
             uint8_t need_reset;
             /* for checking status transitions */
             uint8_t device_status_prev;
+            /* for VIRTIO_NET_F_MRG_RXBUF */
+            uint16_t mtu_mrg_rxbuf;
         };
     };
 } __attribute__((packed)) virtio_pci_common_cfg_t;
@@ -214,12 +220,52 @@ enum {
     VIRTIO_NET_RSS_HASH_TYPE_UDP_EX     = (1u << 8),
 };
 
+#define VIRTIO_NOTIFY_MUL_SHIFT         2       // 2 ** 2 == 4 (bytes per dbell)
+#define VIRTIO_NOTIFY_QID_SHIFT         6       // 2 ** 6 == 64 (qid per 1/4 region)
+#define VIRTIO_NOTIFY_REG_SHIFT         10      // 2 ** 10 == 1024 (total bytes per region)
+#define VIRTIO_NOTIFY_REG_BYTES         1024
+#define VIRTIO_NOTIFY_MULTIPLIER        4
+
 struct virtio_pci_notify_reg {
-    uint8_t inc_pi_dbell[512];
-    uint8_t set_pi_dbell[512];
+    uint8_t inc_pi_dbell[VIRTIO_NOTIFY_REG_BYTES];
+    uint8_t set_pi_dbell[VIRTIO_NOTIFY_REG_BYTES];
 };
 
-#define VIRTIO_NOTIFY_MULTIPLIER 4
+// number of vqid supported by this notification doorbell layout (total rx + tx + cvq)
+#define VIRTIO_VQID_NOTIFY_COUNT \
+    (VIRTIO_NOTIFY_REG_BYTES / VIRTIO_NOTIFY_MULTIPLIER / 4)
+
+// vqid offset within 1/2 of one notify region (two qtypes of four qtype region)
+#define VIRTIO_VQID_NOTIFY_OFF(vqid) \
+    (((vqid) >> 1) | (((vqid) & 1) << VIRTIO_NOTIFY_QID_SHIFT))
+
+// offset the 1/2 notify region to use, depending on negotiated features
+static inline uint16_t virtio_features_notify_offset(const uint64_t features)
+{
+    uint64_t off = 0;
+
+    if (features & VIRTIO_F_RING_PACKED) {
+        // packed: qtypes 0 and 1, first half of a 4-qtype region
+        if (features & VIRTIO_F_NOTIFICATION_DATA) {
+            off = offsetof(struct virtio_pci_notify_reg,
+                           set_pi_dbell[0]);
+        } else {
+            off = offsetof(struct virtio_pci_notify_reg,
+                           inc_pi_dbell[0]);
+        }
+    } else {
+        // split: qtypes 2 and 3, second half of a 4-qtype region
+        if (features & VIRTIO_F_NOTIFICATION_DATA) {
+            off = offsetof(struct virtio_pci_notify_reg,
+                           set_pi_dbell[VIRTIO_NOTIFY_REG_BYTES / 2]);
+        } else {
+            off = offsetof(struct virtio_pci_notify_reg,
+                           inc_pi_dbell[VIRTIO_NOTIFY_REG_BYTES / 2]);
+        }
+    }
+
+    return (uint16_t)(off / VIRTIO_NOTIFY_MULTIPLIER);
+}
 
 struct virtio_ident_reg {
     uint64_t hw_features;
@@ -250,11 +296,11 @@ struct virtio_dev_regs {
         uint8_t part3[256];
     };
     union {
-        struct virtio_pci_notify_reg notify_reg;
+        uint8_t isr_cfg[1024];
         uint8_t part4[1024];
     };
     union {
-        uint8_t isr_cfg[2048];
+        struct virtio_pci_notify_reg notify_reg;
         uint8_t part5[2048];
     };
     /* indirect queue configs */
