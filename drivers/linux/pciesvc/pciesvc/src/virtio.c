@@ -219,9 +219,9 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
     }
 
     /* isr_cfg */
-    if (VIRTIO_DEV_REG_INSIDE(part5, baroff, size)) {
+    if (VIRTIO_DEV_REG_INSIDE(isr_cfg, baroff, size)) {
         val = 0;
-        pciesvc_logdebug("%s: read part5 "VIRTIO_LOG_FMT"",
+        pciesvc_logdebug("%s: read isr_cfg "VIRTIO_LOG_FMT"",
                          pciehwdev_get_name(phwdev), addr, baroff, size, val);
         return val;
     }
@@ -307,6 +307,40 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
     return val;
 }
 
+// Nicmgr initialized the queue configs with notify offsets in the incr_pi_dbell range.
+// Here we modify the offsets depending on which features are selected, to change the
+// doorbell behavior.
+//
+// Notification Data wants to use SET_PI instead of INC_PI.  Split VQ wants to use
+// SCHED_SET instead of SCHED_NONE for RX.
+//
+// This is done here in pciesvc, so that the driver can read the notify offset of queues
+// _immediately_ after setting features ok.
+static void
+virtio_barwr_config_notif_data(pciehwdev_t *phwdev,
+                               const u_int64_t base,
+                               const u_int64_t features)
+{
+    const uint16_t notify_offset = virtio_features_notify_offset(features);
+    u_int16_t vq_i, vq_count;
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.num_queues),
+                   &vq_count, sizeof(vq_count));
+
+    pciesvc_logdebug("proc: vq_count %u notify_offset %u",
+                     vq_count, notify_offset);
+
+    for (vq_i = 0; vq_i < vq_count; ++vq_i) {
+        u_int64_t off_addr =
+            VIRTIO_DEV_REG_ADDR(base, queue_cfg[vq_i].queue_notify_off);
+
+        u_int16_t off =
+            notify_offset + VIRTIO_VQID_NOTIFY_OFF(vq_i);
+
+        pciesvc_mem_wr(off_addr, &off, sizeof(off));
+    }
+}
+
 static void
 virtio_barwr_device_status(pciehwdev_t *phwdev, const u_int64_t base,
                            const size_t size, const u_int64_t val)
@@ -349,57 +383,33 @@ virtio_barwr_device_status(pciehwdev_t *phwdev, const u_int64_t base,
     }
 
     // FEATURES_OK is only defined for version 1, so this is not entered
-    // for legacy devices. As long as we're only checking for feature bits
-    // above 32 this will be fine.
+    // for legacy devices. Legacy devices react to feature bit changes when
+    // the register is written - see virtio_legacy_barwr_driver_feature().
     if ((val & VIRTIO_S_FEATURES_OK) && !(old & VIRTIO_S_FEATURES_OK)) {
-        u_int32_t feature_lo = 0;
-        u_int32_t feature_hi = 0;
-        u_int64_t feature = 0;
+        u_int64_t features = 0;
+        u_int64_t hw_features = 0;
+        u_int64_t unsupp_features;
 
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[0]),
-                       &feature_lo, sizeof(feature_lo));
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.active_features),
+                       &features, sizeof(features));
 
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[1]),
-                       &feature_hi, sizeof(feature_hi));
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, ident.hw_features),
+                       &hw_features, sizeof(hw_features));
 
-        feature = (u_int64_t)feature_lo | ((u_int64_t)feature_hi << 32);
-
-        pciesvc_loginfo("proc: features_ok 0x%"PRIx64"", feature);
-
-	// VIRTIO_F_NOTIFICATION_DATA is bit 38
-        if (feature & VIRTIO_F_NOTIFICATION_DATA) {
-            // Nicmgr initialized the queue configs with notify offsets in
-            // the incr_pi_dbell range.  If this feature is selected,
-            // modify the queue configs to ring the same doorbell via the
-            // set_pi_dbell range.
-            //
-            // This is done here in pciesvc, so that the driver can read
-            // the notify offset of queues _immediately_ after setting
-            // features ok.
-
-            const uint16_t notify_offset =
-                offsetof(struct virtio_pci_notify_reg, set_pi_dbell)
-                / VIRTIO_NOTIFY_MULTIPLIER;
-
-            u_int16_t vq_i = 0, vq_count = 0;
-
-            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.num_queues),
-                           &vq_count, sizeof(vq_count));
-
-            pciesvc_logdebug("proc: vq_count %u notify_offset %u",
-                             vq_count, notify_offset);
-
-            for (; vq_i < vq_count; ++vq_i) {
-                u_int64_t off_addr =
-                    VIRTIO_DEV_REG_ADDR(base, queue_cfg[vq_i].queue_notify_off);
-
-                u_int16_t off = 0;
-
-                pciesvc_mem_rd(off_addr, &off, sizeof(off));
-                off += notify_offset;
-                pciesvc_mem_wr(off_addr, &off, sizeof(off));
-            }
+        unsupp_features = features & ~hw_features;
+        if (unsupp_features) {
+            pciesvc_logdebug("proc: request for unsupported features %"PRIx64,
+                             unsupp_features);
+            // Don't update the status. Driver will see that the
+            // FEATURES_OK bit was not acknowledged by the device.
+            return;
         }
+
+        pciesvc_loginfo("proc: features_ok 0x%"PRIx64"", features);
+
+        // Now react to any feature bit changes, as needed
+
+        virtio_barwr_config_notif_data(phwdev, base, features);
     }
 
     pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status), &val,
@@ -423,7 +433,6 @@ virtio_barwr_driver_feature(pciehwdev_t *phwdev, const u_int64_t base,
         return;
     }
 
-    // NB - select is always 0 in legacy case
     pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_select),
                    &idx,
                    VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_select));
@@ -437,11 +446,73 @@ virtio_barwr_driver_feature(pciehwdev_t *phwdev, const u_int64_t base,
                          reg_addr - base, size, val);
         // Actually perform the requested write
         pciesvc_mem_wr(reg_addr, &val, reg_size);
+
+        // If the driver negotiates F_MRG_RXBUF, switch to the larger mtu,
+        // this is required /before/ the driver sends features ok.
+        if (idx == 0 && (val & VIRTIO_NET_F_MRG_RXBUF)) {
+            u_int16_t mtu = 0;
+            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.mtu_mrg_rxbuf),
+                           &mtu, sizeof(mtu));
+            pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, net_cfg.mtu),
+                           &mtu, sizeof(mtu));
+        }
     } else {
         pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",
                          pciehwdev_get_name(phwdev), idx, reg_addr,
                          reg_addr - base, size, val);
     }
+}
+
+static void
+virtio_legacy_barwr_driver_feature(pciehwdev_t *phwdev, const u_int64_t base,
+                                   const size_t size, const u_int64_t val)
+{
+    u_int64_t reg_addr, reg_size;
+    u_int64_t hw_features = 0;
+    u_int64_t unsupp_features;
+    u_int8_t status = 0;
+
+    // Verify that device is in the correct state
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status),
+                   &status, sizeof(status));
+
+    // NB: There is no FEATURES_OK bit in the legacy interface
+    if (status & VIRTIO_S_DRIVER_OK) {
+        pciesvc_logdebug("proc: ignoring late features write");
+        return;
+    }
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, ident.hw_features),
+                   &hw_features, sizeof(hw_features));
+
+    unsupp_features = val & ~hw_features;
+    if (unsupp_features) {
+        pciesvc_logdebug("proc: request for unsupported features %"PRIx64"",
+                         unsupp_features);
+        // NB: There is no NEEDS_RESET bit in the legacy interface
+        return;
+    }
+
+    // Now react to any feature bit changes, as needed
+
+    // If the driver negotiates F_MRG_RXBUF, switch to the larger mtu
+    if (val & VIRTIO_NET_F_MRG_RXBUF) {
+        u_int16_t mtu = 0;
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.mtu_mrg_rxbuf),
+                       &mtu, sizeof(mtu));
+        pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, net_cfg.mtu),
+                       &mtu, sizeof(mtu));
+    }
+
+    // NB: driver_feature_select is always 0 in legacy case
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[0]);
+    reg_size = VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_cfg[0]);
+
+    pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT"",
+                     pciehwdev_get_name(phwdev), (u_int64_t)0, reg_addr,
+                     reg_addr - base, size, val);
+    // Actually perform the requested write
+    pciesvc_mem_wr(reg_addr, &val, reg_size);
 }
 
 // 2.7.2 The driver writes a single address pointing to the beginning of
@@ -529,7 +600,7 @@ virtio_legacy_barwr(pciehwdev_t *phwdev, u_int64_t addr,
     VIRTIO_DEV_REG_WR_IGN(legacy_cfg.device_feature);
 
     VIRTIO_DEV_REG_WR_PROC(legacy_cfg.driver_feature,
-                           virtio_barwr_driver_feature);
+                           virtio_legacy_barwr_driver_feature);
 
     VIRTIO_DEV_REG_WR_PROC(legacy_cfg.queue_address,
                            virtio_legacy_barwr_queue_address);
@@ -553,7 +624,6 @@ virtio_legacy_barwr(pciehwdev_t *phwdev, u_int64_t addr,
 
     switch (baroff) {
     VIRTIO_DEV_REG_NOTIFY(legacy_cfg.device_status);
-    VIRTIO_DEV_REG_NOTIFY(legacy_cfg.driver_feature);
     VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_select);
     VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_address); // enable
     VIRTIO_DEV_REG_NOTIFY(legacy_cfg.queue_notify);
