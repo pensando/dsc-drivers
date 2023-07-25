@@ -69,7 +69,7 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "23.04.1-001"
+    DVER = "23.07.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
@@ -82,6 +82,7 @@ KBUILD_RULE = $(MAKE) -C $(KSRC) $(KOPT) M=$(CURDIR)
 mnic: KOPT+=$(ETH_KOPT)
 mnic:
 	@echo "===> Building MNIC driver "
+	mkdir -p $(KMOD_OUT_DIR)
 	touch $(KMOD_OUT_DIR)/Makefile
 	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/eth/ionic $(KOPT)
 	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.mnic
@@ -99,16 +100,25 @@ mdev:
 
 eth: KOPT+=$(ETH_KOPT)
 eth:
-	$(KBUILD_RULE)
+	+$(KBUILD_RULE)
 
 clean: KOPT+=$(ETH_KOPT)
 clean:
 	$(KBUILD_RULE) clean
 
+KBUILD_INSTALL_RULE = $(MAKE) -C $(KSRC) $(KOPT) \
+		      $(if ${DISABLE_MODULE_SIGNING},CONFIG_MODULE_SIG=n) \
+		      $(if ${DISABLE_MODULE_SIGNING},CONFIG_MODULE_SIG_ALL=) \
+		      INSTALL_MOD_DIR=updates \
+		      M=$(CURDIR)
+
 install: modules_install
 modules_install: KOPT+=$(ETH_KOPT)
 modules_install:
-	$(KBUILD_RULE) modules_install
+	@$(call warn_signed_modules)
+	$(KBUILD_INSTALL_RULE) modules_install
+	$(call cmd_depmod)
+	$(call cmd_initramfs)
 
 cscope:
 	find $(IONIC_ETH_SRC) -name '*.[ch]' > cscope.files

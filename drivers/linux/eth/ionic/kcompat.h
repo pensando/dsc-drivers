@@ -36,6 +36,7 @@
 #include <asm/io.h>
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
+#include <linux/dynamic_debug.h>
 
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
 #include <net/devlink.h>
@@ -6822,7 +6823,10 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #endif /* 5.17 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE && \
+	(!RHEL_RELEASE_CODE || \
+	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8, 8) || \
+	 (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 0) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 2))))
 static inline int skb_tcp_all_headers(const struct sk_buff *skb)
 {
 	return skb_transport_offset(skb) + tcp_hdrlen(skb);
@@ -6837,7 +6841,10 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #endif /* 6.0 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE && \
+	(!RHEL_RELEASE_CODE || \
+	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8, 8) || \
+	 (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 0) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 2))))
 
 #if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 0) && defined(netif_napi_add))
 #undef netif_napi_add

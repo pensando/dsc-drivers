@@ -141,6 +141,17 @@ static void ionic_get_regs(struct net_device *netdev, struct ethtool_regs *regs,
 	memcpy_fromio(p + offset, lif->ionic->idev.dev_cmd_regs->words, size);
 }
 
+#if (KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE)
+static void ionic_get_link_ext_stats(struct net_device *netdev,
+				     struct ethtool_link_ext_stats *stats)
+{
+	struct ionic_lif *lif = netdev_priv(netdev);
+
+	if (!lif->ionic->pdev || lif->ionic->pdev->is_physfn)
+		stats->link_down_events = lif->link_down_count;
+}
+#endif
+
 static int ionic_get_link_ksettings(struct net_device *netdev,
 				    struct ethtool_link_ksettings *ks)
 {
@@ -489,9 +500,9 @@ static int ionic_set_fecparam(struct net_device *netdev,
 		break;
 	case ETHTOOL_FEC_AUTO:
 	default:
-		netdev_err(netdev, "FEC request 0x%04x not supported\n",
+		netdev_dbg(netdev, "FEC request 0x%04x not supported\n",
 			   fec->fec);
-		return -EINVAL;
+		return -EOPNOTSUPP;
 	}
 
 	if (fec_type != lif->ionic->idev.port_info->config.fec_type) {
@@ -628,6 +639,8 @@ static int ionic_set_coalesce(struct net_device *netdev,
 						     lif->rxqcqs[i]->intr.index,
 						     lif->rx_coalesce_hw);
 				lif->rxqcqs[i]->intr.dim_coal_hw = rx_dim;
+				lif->rxqcqs[i]->intr.dim_coal_usecs =
+					coalesce->rx_coalesce_usecs;
 			}
 
 			if (lif->txqcqs[i]->flags & IONIC_QCQ_F_INTR) {
@@ -635,6 +648,8 @@ static int ionic_set_coalesce(struct net_device *netdev,
 						     lif->txqcqs[i]->intr.index,
 						     lif->tx_coalesce_hw);
 				lif->txqcqs[i]->intr.dim_coal_hw = tx_dim;
+				lif->txqcqs[i]->intr.dim_coal_usecs =
+					coalesce->tx_coalesce_usecs;
 			}
 		}
 	}
@@ -981,7 +996,7 @@ static int ionic_get_rxnfc(struct net_device *netdev,
 		info->data = lif->nxqs;
 		break;
 	default:
-		netdev_err(netdev, "Command parameter %d is not supported\n",
+		netdev_dbg(netdev, "Command parameter %d is not supported\n",
 			   info->cmd);
 		err = -EOPNOTSUPP;
 	}
@@ -1014,8 +1029,10 @@ static int ionic_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 	int rdma;
 	int ret;
 
-	if (priv_flags & IONIC_PRIV_F_DEVICE_RESET)
-		ionic_device_reset(lif);
+	if (priv_flags & IONIC_PRIV_F_DEVICE_RESET) {
+		ionic_reset_prepare(lif->ionic->pdev);
+		ionic_reset_done(lif->ionic->pdev);
+	}
 
 	clear_bit(IONIC_LIF_F_SW_DEBUG_STATS, lif->state);
 	if (priv_flags & IONIC_PRIV_F_SW_DBG_STATS)
@@ -1353,6 +1370,9 @@ static const struct ethtool_ops ionic_ethtool_ops = {
 	.get_regs_len		= ionic_get_regs_len,
 	.get_regs		= ionic_get_regs,
 	.get_link		= ethtool_op_get_link,
+#if (KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE)
+	.get_link_ext_stats	= ionic_get_link_ext_stats,
+#endif
 	.get_link_ksettings	= ionic_get_link_ksettings,
 	.set_link_ksettings	= ionic_set_link_ksettings,
 	.get_coalesce		= ionic_get_coalesce,

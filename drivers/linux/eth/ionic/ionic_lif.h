@@ -250,6 +250,7 @@ struct ionic_lif {
 	u64 hw_features;
 	unsigned int index;
 	unsigned int hw_index;
+	unsigned int link_down_count;
 
 	u8 rss_hash_key[IONIC_RSS_HASH_KEY_SIZE];
 	u8 *rss_ind_tbl;
@@ -456,7 +457,11 @@ int ionic_lif_addr_add(struct ionic_lif *lif, const u8 *addr);
 int ionic_lif_addr_del(struct ionic_lif *lif, const u8 *addr);
 
 struct ionic_lif *ionic_netdev_lif(struct net_device *netdev);
-void ionic_device_reset(struct ionic_lif *lif);
+
+void ionic_stop_queues_reconfig(struct ionic_lif *lif);
+void ionic_txrx_free(struct ionic_lif *lif);
+void ionic_qcqs_free(struct ionic_lif *lif);
+int ionic_restart_lif(struct ionic_lif *lif);
 
 #ifdef IONIC_DEBUG_STATS
 static inline void debug_stats_txq_post(struct ionic_queue *q, bool dbell)
