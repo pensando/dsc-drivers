@@ -173,3 +173,11 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - code cleaning to better match upstream code
  - module parameter to set DMA mask at load time
  - bug fixes
+
+2023-07-25 - driver update for 23.07.1-001
+ - kcompat update for RHEL 8.8
+ - add FLR handling
+ - add new ethtool extended stat link_down_count
+ - add custom Dynamic IRQ Moderation profile
+ - fix a use-after-free issue seen on ARM
+ - replace WARN_ON with dev_warn()

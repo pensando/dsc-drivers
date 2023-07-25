@@ -289,6 +289,7 @@ struct ionic_intr_info {
 	unsigned int cpu;
 	cpumask_t affinity_mask;
 	u32 dim_coal_hw;
+	u16 dim_coal_usecs;
 };
 
 struct ionic_cq {

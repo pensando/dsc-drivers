@@ -180,38 +180,9 @@ static void ionic_rx_cache_drain(struct ionic_queue *q)
 	stats->cache_full = 0;
 }
 
-static bool ionic_rx_buf_reuse(struct ionic_queue *q,
-			       struct ionic_buf_info *buf_info, u32 used)
-{
-	struct ionic_rx_stats *stats = q_to_rx_stats(q);
-	u32 size;
-
-	if (!dev_page_is_reusable(buf_info->page)) {
-		stats->buf_not_reusable++;
-		return false;
-	}
-
-	size = ALIGN(used, IONIC_PAGE_SPLIT_SZ);
-	buf_info->page_offset += size;
-	if (buf_info->page_offset >= IONIC_PAGE_SIZE) {
-		buf_info->page_offset = 0;
-		stats->buf_exhausted++;
-		return false;
-	}
-
-	stats->buf_reused++;
-
-	get_page(buf_info->page);
-
-	return true;
-}
-
 static void ionic_rx_buf_complete(struct ionic_queue *q,
 				  struct ionic_buf_info *buf_info, u32 used)
 {
-	if (ionic_rx_buf_reuse(q, buf_info, used))
-		return;
-
 	if (!ionic_rx_cache_put(q, buf_info)) {
 #ifndef HAVE_STRUCT_DMA_ATTRS
 		dma_unmap_page_attrs(q->dev, buf_info->dma_addr, IONIC_PAGE_SIZE,
