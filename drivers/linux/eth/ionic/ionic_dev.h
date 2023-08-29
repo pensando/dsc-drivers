@@ -224,7 +224,7 @@ struct ionic_desc_info {
 	};
 	unsigned int bytes;
 	unsigned int nbufs;
-	struct ionic_buf_info bufs[IONIC_MAX_FRAGS];
+	struct ionic_buf_info bufs[MAX_SKB_FRAGS + 1];
 	ionic_desc_cb cb;
 	void *cb_arg;
 };
@@ -362,7 +362,7 @@ int ionic_set_vf_config(struct ionic *ionic, int vf,
 
 void ionic_dev_cmd_queue_identify(struct ionic_dev *idev,
 				  u16 lif_type, u8 qtype, u8 qver);
-void ionic_vf_start(struct ionic *ionic, int vf);
+void ionic_vf_start(struct ionic *ionic);
 void ionic_dev_cmd_lif_identify(struct ionic_dev *idev, u8 type, u8 ver);
 void ionic_dev_cmd_lif_init(struct ionic_dev *idev, u16 lif_index,
 			    dma_addr_t addr);

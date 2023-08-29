@@ -487,22 +487,16 @@ int ionic_set_vf_config(struct ionic *ionic, int vf,
 	return err;
 }
 
-void ionic_vf_start(struct ionic *ionic, int vf)
+void ionic_vf_start(struct ionic *ionic)
 {
 #ifdef IONIC_DEV_IDENTITY_VERSION_2
 	union ionic_dev_cmd cmd = {
 		.vf_ctrl.opcode = IONIC_CMD_VF_CTRL,
+		.vf_ctrl.ctrl_opcode = IONIC_VF_CTRL_START_ALL,
 	};
 
 	if (!(ionic->ident.dev.capabilities & cpu_to_le64(IONIC_DEV_CAP_VF_CTRL)))
 		return;
-
-	if (vf == -1) {
-		cmd.vf_ctrl.ctrl_opcode = IONIC_VF_CTRL_START_ALL;
-	} else {
-		cmd.vf_ctrl.ctrl_opcode = IONIC_VF_CTRL_START;
-		cmd.vf_ctrl.vf_index = cpu_to_le16(vf);
-	}
 
 	ionic_dev_cmd_go(&ionic->idev, &cmd);
 	ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
