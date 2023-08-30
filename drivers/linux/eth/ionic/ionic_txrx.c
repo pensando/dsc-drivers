@@ -180,9 +180,38 @@ static void ionic_rx_cache_drain(struct ionic_queue *q)
 	stats->cache_full = 0;
 }
 
+static bool ionic_rx_buf_reuse(struct ionic_queue *q,
+			       struct ionic_buf_info *buf_info, u32 used)
+{
+	struct ionic_rx_stats *stats = q_to_rx_stats(q);
+	u32 size;
+
+	if (!dev_page_is_reusable(buf_info->page)) {
+		stats->buf_not_reusable++;
+		return false;
+	}
+
+	size = ALIGN(used, IONIC_PAGE_SPLIT_SZ);
+	buf_info->page_offset += size;
+	if (buf_info->page_offset >= IONIC_PAGE_SIZE) {
+		buf_info->page_offset = 0;
+		stats->buf_exhausted++;
+		return false;
+	}
+
+	stats->buf_reused++;
+
+	get_page(buf_info->page);
+
+	return true;
+}
+
 static void ionic_rx_buf_complete(struct ionic_queue *q,
 				  struct ionic_buf_info *buf_info, u32 used)
 {
+	if (ionic_rx_buf_reuse(q, buf_info, used))
+		return;
+
 	if (!ionic_rx_cache_put(q, buf_info)) {
 #ifndef HAVE_STRUCT_DMA_ATTRS
 		dma_unmap_page_attrs(q->dev, buf_info->dma_addr, IONIC_PAGE_SIZE,
@@ -1383,25 +1412,84 @@ static int ionic_tx(struct ionic_queue *q, struct sk_buff *skb)
 static int ionic_tx_descs_needed(struct ionic_queue *q, struct sk_buff *skb)
 {
 	struct ionic_tx_stats *stats = q_to_tx_stats(q);
+	bool too_many_frags = false;
+	skb_frag_t *frag;
+	int desc_bufs;
+	int chunk_len;
+	int frag_rem;
+	int tso_rem;
+	int seg_rem;
+	bool encap;
+	int hdrlen;
 	int ndescs;
 	int err;
 
 	/* Each desc is mss long max, so a descriptor for each gso_seg */
-	if (skb_is_gso(skb))
+	if (skb_is_gso(skb)) {
 		ndescs = skb_shinfo(skb)->gso_segs;
-	else
+	} else {
 		ndescs = 1;
+		if (skb_shinfo(skb)->nr_frags > q->max_sg_elems) {
+			too_many_frags = true;
+			goto linearize;
+		}
+	}
 
-	/* If non-TSO, just need 1 desc and nr_frags sg elems */
-	if (skb_shinfo(skb)->nr_frags <= q->max_sg_elems)
+	/* If non-TSO, or no frags to check, we're done */
+	if (!skb_is_gso(skb) || !skb_shinfo(skb)->nr_frags)
 		return ndescs;
 
-	/* Too many frags, so linearize */
-	err = skb_linearize(skb);
-	if (err)
-		return err;
+	/* We need to scan the skb to be sure that none of the MTU sized
+	 * packets in the TSO will require more sgs per descriptor than we
+	 * can support.  We loop through the frags, add up the lengths for
+	 * a packet, and count the number of sgs used per packet.
+	 */
+	tso_rem = skb->len;
+	frag = skb_shinfo(skb)->frags;
+	encap = skb->encapsulation;
 
-	stats->linearize++;
+	/* start with just hdr in first part of first descriptor */
+	if (encap)
+		hdrlen = skb_inner_tcp_all_headers(skb);
+	else
+		hdrlen = skb_tcp_all_headers(skb);
+	seg_rem = min_t(int, tso_rem, hdrlen + skb_shinfo(skb)->gso_size);
+	frag_rem = hdrlen;
+
+	while (tso_rem > 0) {
+		desc_bufs = 0;
+		while (seg_rem > 0) {
+			desc_bufs++;
+
+			/* We add the +1 because we can take buffers for one
+			 * more than we have SGs: one for the initial desc data
+			 * in addition to the SG segments that might follow.
+			 */
+			if (desc_bufs > q->max_sg_elems + 1) {
+				too_many_frags = true;
+				goto linearize;
+			}
+
+			if (frag_rem == 0) {
+				frag_rem = skb_frag_size(frag);
+				frag++;
+			}
+			chunk_len = min(frag_rem, seg_rem);
+			frag_rem -= chunk_len;
+			tso_rem -= chunk_len;
+			seg_rem -= chunk_len;
+		}
+
+		seg_rem = min_t(int, tso_rem, skb_shinfo(skb)->gso_size);
+	}
+
+linearize:
+	if (too_many_frags) {
+		err = skb_linearize(skb);
+		if (err)
+			return err;
+		stats->linearize++;
+	}
 
 	return ndescs;
 }

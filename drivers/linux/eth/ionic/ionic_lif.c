@@ -179,7 +179,7 @@ static void ionic_link_status_check(struct ionic_lif *lif)
 				netdev_err(netdev,
 					   "Failed to start queues: %d\n", err);
 				set_bit(IONIC_LIF_F_BROKEN, lif->state);
-				netif_carrier_off(netdev);
+				netif_carrier_off(lif->netdev);
 			}
 			mutex_unlock(&lif->queue_lock);
 		}
@@ -1864,7 +1864,7 @@ static int ionic_set_mac_address(struct net_device *netdev, void *sa)
 		return err;
 
 	if (err > 0)
-		netdev_dbg(netdev, "%s: SET and GET ATTR Mac is not equal-due to old FW running\n",
+		netdev_dbg(netdev, "%s: SET and GET ATTR Mac are not equal-due to old FW running\n",
 			   __func__);
 
 	err = eth_prepare_mac_addr_change(netdev, addr);
@@ -1910,6 +1910,20 @@ static int ionic_start_queues_reconfig(struct ionic_lif *lif)
 	return err;
 }
 
+static int ionic_check_valid_mtu(struct ionic_lif *lif, int new_mtu)
+{
+	int fs;
+
+	fs = new_mtu + ETH_HLEN + VLAN_HLEN;
+	if (fs < le32_to_cpu(lif->identity->eth.min_frame_size) ||
+	    fs > le32_to_cpu(lif->identity->eth.max_frame_size)) {
+		netdev_err(lif->netdev, "Invalid MTU %d\n", new_mtu);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int ionic_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
@@ -1923,14 +1937,10 @@ static int ionic_change_mtu(struct net_device *netdev, int new_mtu)
 		},
 	};
 	int err;
-	int fs;
 
-	fs = new_mtu + ETH_HLEN + VLAN_HLEN;
-	if (fs < le32_to_cpu(lif->identity->eth.min_frame_size) ||
-	    fs > le32_to_cpu(lif->identity->eth.max_frame_size)) {
-		netdev_err(netdev, "Invalid MTU %d\n", new_mtu);
-		return -EINVAL;
-	}
+	err = ionic_check_valid_mtu(lif, new_mtu);
+	if (err)
+		return err;
 
 	err = ionic_adminq_post_wait(lif, &ctx);
 	if (err)
@@ -1957,6 +1967,7 @@ static int ionic_change_mtu(struct net_device *netdev, int new_mtu)
 static void ionic_tx_timeout_work(struct work_struct *ws)
 {
 	struct ionic_lif *lif = container_of(ws, struct ionic_lif, tx_timeout_work);
+	int err;
 
 	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return;
@@ -1969,8 +1980,11 @@ static void ionic_tx_timeout_work(struct work_struct *ws)
 
 	mutex_lock(&lif->queue_lock);
 	ionic_stop_queues_reconfig(lif);
-	ionic_start_queues_reconfig(lif);
+	err = ionic_start_queues_reconfig(lif);
 	mutex_unlock(&lif->queue_lock);
+
+	if (err)
+		dev_err(lif->ionic->dev, "%s: Restarting queues failed\n", __func__);
 }
 
 #ifdef HAVE_TX_TIMEOUT_TXQUEUE
@@ -2830,7 +2844,7 @@ static void ionic_vf_attr_replay(struct ionic_lif *lif)
 
 	up_read(&ionic->vf_op_lock);
 
-	ionic_vf_start(ionic, -1);
+	ionic_vf_start(ionic);
 }
 
 static const struct net_device_ops ionic_netdev_ops = {
@@ -2946,17 +2960,22 @@ static int ionic_cmb_reconfig(struct ionic_lif *lif,
 			if (err) {
 				dev_err(lif->ionic->dev,
 					"CMB restore failed: %d\n", err);
-				goto errout;
+				goto err_out;
 			}
 		}
 
-		ionic_start_queues_reconfig(lif);
-	} else {
-		/* This was detached in ionic_stop_queues_reconfig() */
-		netif_device_attach(lif->netdev);
+		err = ionic_start_queues_reconfig(lif);
+		if (err) {
+			dev_err(lif->ionic->dev,
+				"CMB reconfig failed: %d\n", err);
+			goto err_out;
+		}
 	}
 
-errout:
+err_out:
+	/* This was detached in ionic_stop_queues_reconfig() */
+	netif_device_attach(lif->netdev);
+
 	return err;
 }
 
@@ -3458,9 +3477,9 @@ int ionic_restart_lif(struct ionic_lif *lif)
 			goto err_txrx_free;
 	}
 
-	clear_bit(IONIC_LIF_F_FW_RESET, lif->state);
 	mutex_unlock(&lif->queue_lock);
 
+	clear_bit(IONIC_LIF_F_FW_RESET, lif->state);
 	ionic_link_status_check_request(lif, CAN_SLEEP);
 	netif_device_attach(lif->netdev);
 
@@ -4008,6 +4027,18 @@ static void ionic_lif_queue_identify(struct ionic_lif *lif)
 			qtype, qti->max_sg_elems);
 		dev_dbg(ionic->dev, " qtype[%d].sg_desc_stride = %d\n",
 			qtype, qti->sg_desc_stride);
+
+		if (qti->max_sg_elems >= IONIC_MAX_FRAGS) {
+			qti->max_sg_elems = IONIC_MAX_FRAGS - 1;
+			dev_dbg(ionic->dev, "limiting qtype %d max_sg_elems to IONIC_MAX_FRAGS-1 %d\n",
+				qtype, qti->max_sg_elems);
+		}
+
+		if (qti->max_sg_elems > MAX_SKB_FRAGS) {
+			qti->max_sg_elems = MAX_SKB_FRAGS;
+			dev_dbg(ionic->dev, "limiting qtype %d max_sg_elems to MAX_SKB_FRAGS %d\n",
+				qtype, qti->max_sg_elems);
+		}
 	}
 }
 

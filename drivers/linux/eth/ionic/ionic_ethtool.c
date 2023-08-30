@@ -640,7 +640,7 @@ static int ionic_set_coalesce(struct net_device *netdev,
 						     lif->rx_coalesce_hw);
 				lif->rxqcqs[i]->intr.dim_coal_hw = rx_dim;
 				lif->rxqcqs[i]->intr.dim_coal_usecs =
-					coalesce->rx_coalesce_usecs;
+							lif->rx_coalesce_usecs;
 			}
 
 			if (lif->txqcqs[i]->flags & IONIC_QCQ_F_INTR) {
@@ -649,7 +649,7 @@ static int ionic_set_coalesce(struct net_device *netdev,
 						     lif->tx_coalesce_hw);
 				lif->txqcqs[i]->intr.dim_coal_hw = tx_dim;
 				lif->txqcqs[i]->intr.dim_coal_usecs =
-					coalesce->tx_coalesce_usecs;
+							lif->tx_coalesce_usecs;
 			}
 		}
 	}
@@ -693,7 +693,8 @@ static int ionic_validate_cmb_config(struct ionic_lif *lif,
 
 	pages_have = lif->ionic->bars[IONIC_PCI_BAR_CMB].len / PAGE_SIZE;
 	if (pages_required > pages_have) {
-		netdev_info(lif->netdev, "Not enough CMB pages for number of queues and size of descriptor rings, need %d have %d",
+		netdev_info(lif->netdev,
+			    "Not enough CMB pages for number of queues and size of descriptor rings, need %d have %d",
 			    pages_required, pages_have);
 		return -ENOMEM;
 	}

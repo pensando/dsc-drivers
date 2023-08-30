@@ -181,3 +181,10 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - add custom Dynamic IRQ Moderation profile
  - fix a use-after-free issue seen on ARM
  - replace WARN_ON with dev_warn()
+
+2023-08-29 - driver update for 23.08.1-001
+ - updates to FLR handling
+ - improved handling of scatter-gather with TSO
+ - better error handling for ionic_start_queues_reconfig
+ - fix up initial coalesce_usec values
+ - various other small updates from upstream

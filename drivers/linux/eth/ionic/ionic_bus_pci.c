@@ -305,14 +305,13 @@ static int ionic_setup_one(struct ionic *ionic)
 	if (err)
 		goto err_out_clear_pci;
 
-	pci_set_master(pdev);
-
 	/* Configure the device */
 	err = ionic_setup(ionic);
 	if (err) {
 		dev_err(dev, "Cannot setup device: %d, aborting\n", err);
 		goto err_out_clear_pci;
 	}
+	pci_set_master(pdev);
 
 	err = ionic_identify(ionic);
 	if (err) {
@@ -389,8 +388,6 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_out;
 
-	pci_save_state(pdev);
-
 	/* Allocate and init the LIF */
 	err = ionic_lif_size(ionic);
 	if (err) {
@@ -447,11 +444,11 @@ err_out_free_lifs:
 err_out_free_irqs:
 	ionic_bus_free_irq_vectors(ionic);
 err_out_pci:
+	ionic_dev_teardown(ionic);
 	ionic_clear_pci(ionic);
 err_out:
 	mutex_destroy(&ionic->dev_cmd_lock);
 	ionic_devlink_free(ionic);
-	pci_set_drvdata(pdev, NULL);
 
 	return err;
 }
@@ -459,9 +456,6 @@ err_out:
 static void ionic_remove(struct pci_dev *pdev)
 {
 	struct ionic *ionic = pci_get_drvdata(pdev);
-
-	if (!ionic)
-		return;
 
 	del_timer_sync(&ionic->watchdog_timer);
 
@@ -488,7 +482,7 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	struct ionic *ionic = pci_get_drvdata(pdev);
 	struct ionic_lif *lif = ionic->lif;
 
-	dev_info(ionic->dev, "Device stopping\n");
+	dev_dbg(ionic->dev, "%s: device stopping\n", __func__);
 
 	/* Stop the timer first so it can't re-schedule more work, but note
 	 * that there is a small chance the device could send an
@@ -509,8 +503,6 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	ionic_dev_teardown(ionic);
 	ionic_clear_pci(ionic);
 	ionic_debugfs_del_dev(ionic);
-
-	dev_info(ionic->dev, "Device stopped\n");
 }
 
 void ionic_reset_done(struct pci_dev *pdev)
@@ -519,14 +511,9 @@ void ionic_reset_done(struct pci_dev *pdev)
 	struct ionic_lif *lif = ionic->lif;
 	int err;
 
-	dev_info(ionic->dev, "Device recover started\n");
-
 	err = ionic_setup_one(ionic);
 	if (err)
 		goto err_out;
-
-	pci_restore_state(pdev);
-	pci_save_state(pdev);
 
 	ionic_debugfs_add_sizes(ionic);
 	ionic_debugfs_add_lif(ionic->lif);
@@ -538,8 +525,8 @@ void ionic_reset_done(struct pci_dev *pdev)
 	mod_timer(&ionic->watchdog_timer, jiffies + 1);
 
 err_out:
-	dev_info(ionic->dev, "Device recovery %s\n",
-		 err ? "failed" : "done");
+	dev_dbg(ionic->dev, "%s: device recovery %s\n",
+		__func__, err ? "failed" : "done");
 }
 
 #if (KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE)
