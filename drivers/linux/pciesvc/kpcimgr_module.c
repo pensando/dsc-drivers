@@ -14,10 +14,15 @@
 #include <linux/module.h>
 #include <linux/ctype.h>
 
-MODULE_LICENSE("GPL");
-
 #include "kpcimgr_api.h"
+#include "pciesvc.h"
 #include "version.h"
+
+MODULE_LICENSE("GPL");
+MODULE_VERSION(__stringify(PCIESVC_VERSION_MAJ) "."
+	       __stringify(PCIESVC_VERSION_MIN));
+MODULE_INFO(build, PCIESVC_VERSION);
+MODULE_INFO(intree, "Y"); /* no out-of-tree module taints kernel */
 
 static int relocate = 0;
 #ifdef DEBUG_KPCIMGR
