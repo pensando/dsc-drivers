@@ -174,7 +174,7 @@ void kpcimgr_report_stats(kstate_t *ks, int phase, int always, int rightnow)
 	if (!always && (now - last_call) < 5 * TICKS_PER_SEC)
 		return;
 
-	p = &pshmem->port[0];
+	p = PSHMEM_ADDR_FIELD(pshmem, port[0]);
 	s = &p->stats;
 	cfgrd = s->ind_cfgrd - ks->ind_cfgrd;
 	cfgwr = s->ind_cfgwr - ks->ind_cfgwr;
