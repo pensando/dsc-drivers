@@ -83,7 +83,8 @@ stlp_overlap(const pcie_stlp_t *stlp,
 static pciehwdevh_t
 cfgpa_to_hwdevh(const u_int64_t cfgpa)
 {
-#define CFGCURSZ sizeof(((pciehw_mem_t *)0L)->cfgcur)
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+#define CFGCURSZ PHWMEM_SIZEOF(phwmem, pshmem, cfgcur)
     const u_int64_t cfgcurpa = pciesvc_cfgcur_pa();
 
     if (cfgpa >= cfgcurpa && cfgpa < cfgcurpa + CFGCURSZ) {
@@ -636,7 +637,7 @@ pciehw_sriov_adjust_vf0(pciehwdev_t *vfhwdev, const int numvfs)
         pciehw_spmt_t *spmt, *spmte;
         if (!phwbar->valid) continue;
         do_log = 1; /* log adjust_vf0 for first pmt of bar */
-        spmt = &pshmem->spmt[phwbar->pmtb];
+        spmt = PSHMEM_ADDR_FIELD(pshmem, spmt[phwbar->pmtb]);
         spmte = spmt + phwbar->pmtc;
         for ( ; spmt < spmte; spmt++) {
             if (spmt->vf0) {
