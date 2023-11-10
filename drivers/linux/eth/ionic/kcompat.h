@@ -6823,6 +6823,11 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #endif /* 5.17 */
 
 /*****************************************************************************/
+#if (KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE)
+#define vcalloc(a, b)	vzalloc((a) * (b))
+#endif /* 5.18 */
+
+/*****************************************************************************/
 #if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE && \
 	(!RHEL_RELEASE_CODE || \
 	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8, 8) || \

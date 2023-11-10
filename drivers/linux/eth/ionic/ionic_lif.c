@@ -449,14 +449,12 @@ static void ionic_qcq_free(struct ionic_lif *lif, struct ionic_qcq *qcq)
 
 	ionic_qcq_intr_free(lif, qcq);
 
-	if (qcq->cq.info) {
-		vfree(qcq->cq.info);
-		qcq->cq.info = NULL;
-	}
-	if (qcq->q.info) {
-		vfree(qcq->q.info);
-		qcq->q.info = NULL;
-	}
+	vfree(qcq->cq.info);
+	qcq->cq.info = NULL;
+	vfree(qcq->q.page_cache);
+	qcq->q.page_cache = NULL;
+	vfree(qcq->q.info);
+	qcq->q.info = NULL;
 }
 
 void ionic_qcqs_free(struct ionic_lif *lif)
@@ -609,11 +607,25 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 	new->q.info = vzalloc_node(num_descs * sizeof(*new->q.info),
 				   dev_to_node(dev));
 	if (!new->q.info) {
-		new->q.info = vzalloc(num_descs * sizeof(*new->q.info));
+		new->q.info = vcalloc(num_descs, sizeof(*new->q.info));
 		if (!new->q.info) {
 			netdev_err(lif->netdev, "Cannot allocate queue info\n");
 			err = -ENOMEM;
 			goto err_out_free_qcq;
+		}
+	}
+
+	if (type == IONIC_QTYPE_RXQ) {
+		new->q.page_cache = vzalloc_node(sizeof(*new->q.page_cache),
+						 dev_to_node(dev));
+		if (!new->q.page_cache) {
+			new->q.page_cache = vzalloc(sizeof(*new->q.page_cache));
+			if (!new->q.page_cache) {
+				netdev_err(lif->netdev,
+					   "Cannot allocate page cache\n");
+				err = -ENOMEM;
+				goto err_out_free_q_info;
+			}
 		}
 	}
 
@@ -624,7 +636,7 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 			   desc_size, sg_desc_size, pid);
 	if (err) {
 		netdev_err(lif->netdev, "Cannot initialize queue\n");
-		goto err_out_free_q_info;
+		goto err_out_free_q_page_cache;
 	}
 
 	err = ionic_alloc_qcq_interrupt(lif, new);
@@ -634,7 +646,7 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 	new->cq.info = vzalloc_node(num_descs * sizeof(*new->cq.info),
 				    dev_to_node(dev));
 	if (!new->cq.info) {
-		new->cq.info = vzalloc(num_descs * sizeof(*new->cq.info));
+		new->cq.info = vcalloc(num_descs, sizeof(*new->cq.info));
 		if (!new->cq.info) {
 			netdev_err(lif->netdev,
 				   "Cannot allocate completion queue info\n");
@@ -766,6 +778,8 @@ err_out_free_irq:
 		devm_free_irq(dev, new->intr.vector, &new->napi);
 		ionic_intr_free(lif->ionic, new->intr.index);
 	}
+err_out_free_q_page_cache:
+	vfree(new->q.page_cache);
 err_out_free_q_info:
 	vfree(new->q.info);
 err_out_free_qcq:
@@ -2988,6 +3002,7 @@ static void ionic_swap_queues(struct ionic_qcq *a, struct ionic_qcq *b)
 	swap(a->q.base,       b->q.base);
 	swap(a->q.base_pa,    b->q.base_pa);
 	swap(a->q.info,       b->q.info);
+	swap(a->q.page_cache, b->q.page_cache);
 	swap(a->q_base,       b->q_base);
 	swap(a->q_base_pa,    b->q_base_pa);
 	swap(a->q_size,       b->q_size);

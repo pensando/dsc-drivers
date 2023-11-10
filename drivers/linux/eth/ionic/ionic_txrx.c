@@ -105,14 +105,14 @@ static inline dma_addr_t ionic_rx_buf_pa(struct ionic_buf_info *buf_info)
 
 static inline unsigned int ionic_rx_buf_size(struct ionic_buf_info *buf_info)
 {
-	return IONIC_PAGE_SIZE - buf_info->page_offset;
+	return min_t(u32, IONIC_MAX_BUF_LEN, IONIC_PAGE_SIZE - buf_info->page_offset);
 }
 
 static bool ionic_rx_cache_put(struct ionic_queue *q,
 			       struct ionic_buf_info *buf_info)
 {
-	struct ionic_page_cache *cache = &q->page_cache;
 	struct ionic_rx_stats *stats = q_to_rx_stats(q);
+	struct ionic_page_cache *cache = q->page_cache;
 	u32 tail_next;
 
 	tail_next = (cache->tail + 1) & (IONIC_PAGE_CACHE_SIZE - 1);
@@ -133,8 +133,8 @@ static bool ionic_rx_cache_put(struct ionic_queue *q,
 static bool ionic_rx_cache_get(struct ionic_queue *q,
 			       struct ionic_buf_info *buf_info)
 {
-	struct ionic_page_cache *cache = &q->page_cache;
 	struct ionic_rx_stats *stats = q_to_rx_stats(q);
+	struct ionic_page_cache *cache = q->page_cache;
 
 	if (unlikely(cache->head == cache->tail)) {
 		stats->cache_empty++;
@@ -159,8 +159,8 @@ static bool ionic_rx_cache_get(struct ionic_queue *q,
 
 static void ionic_rx_cache_drain(struct ionic_queue *q)
 {
-	struct ionic_page_cache *cache = &q->page_cache;
 	struct ionic_rx_stats *stats = q_to_rx_stats(q);
+	struct ionic_page_cache *cache = q->page_cache;
 	struct ionic_buf_info *buf_info;
 
 	while (cache->head != cache->tail) {
@@ -925,7 +925,7 @@ static void ionic_tx_clean(struct ionic_queue *q,
 
 	qi = skb_get_queue_mapping(skb);
 
-	if (unlikely(q->features & IONIC_TXQ_F_HWSTAMP)) {
+	if (ionic_txq_hwstamp_enabled(q)) {
 		if (cq_info) {
 			struct skb_shared_hwtstamps hwts = {};
 			__le64 *cq_desc_hwstamp;
@@ -994,7 +994,7 @@ bool ionic_tx_service(struct ionic_cq *cq, struct ionic_cq_info *cq_info)
 	} while (index != le16_to_cpu(comp->comp_index));
 
 #ifdef IONIC_SUPPORTS_BQL
-	if (pkts && bytes && !unlikely(q->features & IONIC_TXQ_F_HWSTAMP))
+	if (pkts && bytes && !ionic_txq_hwstamp_enabled(q))
 		netdev_tx_completed_queue(q_to_ndq(q), pkts, bytes);
 #endif
 
@@ -1035,7 +1035,7 @@ void ionic_tx_empty(struct ionic_queue *q)
 	}
 
 #ifdef IONIC_SUPPORTS_BQL
-	if (pkts && bytes && !unlikely(q->features & IONIC_TXQ_F_HWSTAMP))
+	if (pkts && bytes && !ionic_txq_hwstamp_enabled(q))
 		netdev_tx_completed_queue(q_to_ndq(q), pkts, bytes);
 #endif
 }
@@ -1120,7 +1120,7 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 	if (start) {
 		skb_tx_timestamp(skb);
 #ifdef IONIC_SUPPORTS_BQL
-		if (!unlikely(q->features & IONIC_TXQ_F_HWSTAMP))
+		if (!ionic_txq_hwstamp_enabled(q))
 			netdev_tx_sent_queue(q_to_ndq(q), skb->len);
 #endif
 		ionic_txq_post(q, false, ionic_tx_clean, skb);
@@ -1397,7 +1397,7 @@ static int ionic_tx(struct ionic_queue *q, struct sk_buff *skb)
 	stats->bytes += skb->len;
 
 #ifdef IONIC_SUPPORTS_BQL
-	if (!unlikely(q->features & IONIC_TXQ_F_HWSTAMP))
+	if (!ionic_txq_hwstamp_enabled(q))
 		netdev_tx_sent_queue(q_to_ndq(q), skb->len);
 #endif
 #ifdef HAVE_SKB_XMIT_MORE
