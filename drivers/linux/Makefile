@@ -42,8 +42,8 @@ ALL += mnet_uio_pdrv_genirq
 ALL += mdev
 export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
 
-KSYMS_MNIC = "KBUILD_EXTRA_SYMBOLS=${KMOD_OUT_DIR}/Module.symvers.mnic"
-KSYMS = "${KSYMS_MNIC} ${KMOD_OUT_DIR}/Module.symvers.uio"
+KSYMS_MNIC = $(KMOD_OUT_DIR)/Module.symvers.mnic
+KSYMS_UIO = $(KMOD_OUT_DIR)/Module.symvers.uio
 
 DVER = $(shell cd $(KMOD_SRC_DIR) ; git describe --tags 2>/dev/null)
 
@@ -56,9 +56,8 @@ include linux_ver.mk
 
 KSRC ?= /lib/modules/$(shell uname -r)/build
 ETH_KOPT += CONFIG_IONIC=m
-ETH_KOPT += CONFIG_IONIC_MNIC=_
-ETH_KOPT += CONFIG_MDEV=_
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
+ETH_KOPT += CONFIG_MDEV=_
 KCFLAGS += -DCONFIG_IONIC
 
 KCFLAGS = -Werror
@@ -69,15 +68,15 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "23.08.1-001"
+    DVER = "23.09.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
-KOPT += KCFLAGS="$(KCFLAGS)"
+KOPT += KCFLAGS="$(KCFLAGS)" KBUILD_EXTRA_SYMBOLS="$(KSYMS)"
 
 all: $(ALL)
 
-KBUILD_RULE = $(MAKE) -C $(KSRC) $(KOPT) M=$(CURDIR)
+KBUILD_RULE = $(MAKE) -C $(KSRC) $(KOPT) M=$(CURDIR) KMOD_SRC_DIR=$(CURDIR)
 
 mnic: KOPT+=$(ETH_KOPT)
 mnic:
@@ -94,17 +93,22 @@ mnet_uio_pdrv_genirq:
 	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.uio
 
 mdev: KOPT+=$(ETH_KOPT)
+mdev: KSYMS+=$(KSYMS_MNIC)
+mdev: KSYMS+=$(KSYMS_UIO)
 mdev:
 	@echo "===> Building MDEV driver "
-	$(MAKE) -C $(KSRC) $(KSYMS) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mdev $(KOPT)
+	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/mdev $(KOPT)
 
 eth: KOPT+=$(ETH_KOPT)
 eth:
+	@echo "===> Building ETH driver "
 	+$(KBUILD_RULE)
+	mv $(CURDIR)/Module.symvers $(CURDIR)/Module.symvers.ionic
 
 clean: KOPT+=$(ETH_KOPT)
 clean:
 	$(KBUILD_RULE) clean
+	rm -f $(CURDIR)/Module.symvers*
 
 KBUILD_INSTALL_RULE = $(MAKE) -C $(KSRC) $(KOPT) \
 		      $(if ${DISABLE_MODULE_SIGNING},CONFIG_MODULE_SIG=n) \
@@ -118,7 +122,6 @@ modules_install:
 	@$(call warn_signed_modules)
 	$(KBUILD_INSTALL_RULE) modules_install
 	$(call cmd_depmod)
-	$(call cmd_initramfs)
 
 cscope:
 	find $(IONIC_ETH_SRC) -name '*.[ch]' > cscope.files

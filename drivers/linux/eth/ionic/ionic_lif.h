@@ -383,6 +383,11 @@ static inline bool ionic_is_pf(struct ionic *ionic)
 	       ionic->pdev->device == PCI_DEVICE_ID_PENSANDO_IONIC_ETH_PF;
 }
 
+static inline bool ionic_txq_hwstamp_enabled(struct ionic_queue *q)
+{
+	return unlikely(q->features & IONIC_TXQ_F_HWSTAMP);
+}
+
 void ionic_lif_deferred_enqueue(struct ionic_deferred *def,
 				struct ionic_deferred_work *work);
 void ionic_link_status_check_request(struct ionic_lif *lif, bool can_sleep);

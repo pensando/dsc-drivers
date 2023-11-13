@@ -188,3 +188,9 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - better error handling for ionic_start_queues_reconfig
  - fix up initial coalesce_usec values
  - various other small updates from upstream
+
+2023-11-10 - driver update for 23.09.1-001
+ - bug fix for copying the page_cache pointer in queue reconfig
+ - some general code and Makefile cleaning
+ - fix 16bit math issue when PAGE_SIZE >= 64KB
+ - restrict page-cache allocation to Rx queues
