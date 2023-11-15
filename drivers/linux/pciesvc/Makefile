@@ -17,26 +17,40 @@ INCLUDES = -I$(PWD) \
 	   -I$(PWD)/pciesvc/include \
 	   -I$(PWD)/pciesvc/src
 
-$(MODNAME)-y := $(kpci) kpcimgr_module.o kpcinterface.o kpci_entry.o \
-		kpci_kexec.o kpci_test.o pciesvc_end.o
+$(MODNAME)-y := $(kpci) kpci_get_entry.o kpcimgr_module.o kpcinterface.o \
+	     kpci_entry.o kpci_kexec.o kpci_test.o pciesvc_end.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 UTS := X$(shell grep UTS_RELEASE $(KDIR)/include/generated/utsrelease.h)
 REL := $(shell echo $(UTS) | awk '{ print $$3 }' | sed -e 's/"//g')
 
-# For older toolchains override with "make CC_HAS_NO_STORE_MERGING=0 ..."
-CC_HAS_NO_STORE_MERGING = 1
+# find CC like the kernel build does
+ifneq ($(LLVM),)
+CC = clang
+else
+CC = $(CROSS_COMPILE)gcc
+endif
+
+# Check for cc flag support, if yes emit the flag else alternate (or null)
+# Usage: CFLAGS += $(call cc-option,-fno-store-merging,)
+cc-option = $(shell set -e;		\
+	TMPO=/tmp/cc-option-$$$$-tmp.o;	\
+	trap "rm -rf $$TMPO" EXIT;	\
+	if ($(CC) -Werror $(1) -c -x c /dev/null -o $$TMPO) >/dev/null 2>&1; \
+	then echo "$(1)";		\
+	else echo "$(2)";		\
+	fi)
 
 KCFLAGS = -fno-jump-tables -fno-stack-protector -fno-function-sections
 KCFLAGS += -fno-data-sections -mstrict-align
-ifeq ($(CC_HAS_NO_STORE_MERGING),1)
-KCFLAGS += -fno-store-merging
-endif
+KCFLAGS += $(call cc-option,-fno-store-merging,)
 KCFLAGS += $(INCLUDES) -DASIC_ELBA -DPCIESVC_SYSTEM_EXTERN
 KOPT = KCFLAGS="$(KCFLAGS)"
 
-all: pciesvc.ko pciesvc_upg.ko
+all:
+	make pciesvc.ko
+	make pciesvc_upg.ko
 
 buildmod:
 	$(MAKE) -C $(KDIR) M=$(PWD) $(KOPT) modules

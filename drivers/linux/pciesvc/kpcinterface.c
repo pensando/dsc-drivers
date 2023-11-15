@@ -9,9 +9,7 @@
  * Author: rob.gardner@oracle.com
  */
 
-#include "kpcimgr_api.h"
-#include "pciesvc.h"
-#include "pciesvc_system.h"
+#include "pciesvc_impl.h"
 #include "version.h"
 
 /*
@@ -251,16 +249,6 @@ pciesvc_reg_rd32(const uint64_t pa)
     return val;
 }
 
-static inline void
-pciesvc_reg_rd32w(const uint64_t pa, uint32_t *w, const uint32_t nw)
-{
-    int i;
-
-    for (i = 0; i < nw; i++) {
-        w[i] = pciesvc_reg_rd32(pa + (i * 4));
-    }
-}
-
 void
 pciesvc_pciepreg_rd32(const uint64_t pa, uint32_t *dest)
 {
@@ -284,16 +272,6 @@ pciesvc_reg_wr32(const uint64_t pa, const uint32_t val)
 
     pciesvc_assert((pa & 0x3) == 0);
     writel(val, va);
-}
-
-static inline void
-pciesvc_reg_wr32w(const uint64_t pa, const uint32_t *w, const uint32_t nw)
-{
-    int i;
-
-    for (i = 0; i < nw; i++) {
-        pciesvc_reg_wr32(pa + (i * 4), w[i]);
-    }
 }
 
 /*
