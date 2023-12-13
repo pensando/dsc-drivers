@@ -194,3 +194,8 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - some general code and Makefile cleaning
  - fix 16bit math issue when PAGE_SIZE >= 64KB
  - restrict page-cache allocation to Rx queues
+
+23-12-14 - driver update for 23.12.2-001
+ - updates from upstream kernel fixes
+ - updates to FLR handling
+ - added AER error handling

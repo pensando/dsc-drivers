@@ -187,6 +187,7 @@ enum ionic_lif_state_flags {
 	IONIC_LIF_F_RX_DIM_INTR,
 	IONIC_LIF_F_CMB_TX_RINGS,
 	IONIC_LIF_F_CMB_RX_RINGS,
+	IONIC_LIF_F_IN_SHUTDOWN,
 
 	/* leave this as last */
 	IONIC_LIF_F_STATE_SIZE

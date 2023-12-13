@@ -383,7 +383,6 @@ int ionic_adminq_wait(struct ionic_lif *lif, struct ionic_admin_ctx *ctx,
 		if (do_msg && !test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 			netdev_err(netdev, "Posting of %s (%d) failed: %d\n",
 				   name, ctx->cmd.cmd.opcode, err);
-
 		ctx->comp.comp.status = IONIC_RC_ERROR;
 		return err;
 	}
@@ -429,6 +428,9 @@ static int __ionic_adminq_post_wait(struct ionic_lif *lif,
 
 	/* if platform dev is resetting, don't bother with AdminQ, it's not there */
 	if (lif->ionic->pfdev && test_bit(IONIC_LIF_F_FW_STOPPING, lif->state))
+		return 0;
+
+	if (!ionic_is_fw_running(&lif->ionic->idev))
 		return 0;
 
 	err = ionic_adminq_post(lif, ctx);
@@ -483,7 +485,7 @@ static int __ionic_dev_cmd_wait(struct ionic *ionic, unsigned long max_seconds,
 	 */
 	max_wait = jiffies + (max_seconds * HZ);
 try_again:
-	opcode = ioread8(&idev->dev_cmd_regs->cmd.cmd.opcode);
+	opcode = idev->opcode;
 	start_time = jiffies;
 	for (fw_up = ionic_is_fw_running(idev);
 	     !done && fw_up && time_before(jiffies, max_wait);
@@ -592,13 +594,13 @@ int ionic_identify(struct ionic *ionic)
 
 	ident->drv.os_type = cpu_to_le32(IONIC_OS_TYPE_LINUX);
 	ident->drv.os_dist = 0;
-	strncpy(ident->drv.os_dist_str, utsname()->release,
-		sizeof(ident->drv.os_dist_str) - 1);
+	strscpy(ident->drv.os_dist_str, utsname()->release,
+		sizeof(ident->drv.os_dist_str));
 	ident->drv.kernel_ver = cpu_to_le32(LINUX_VERSION_CODE);
-	strncpy(ident->drv.kernel_ver_str, utsname()->version,
-		sizeof(ident->drv.kernel_ver_str) - 1);
-	strncpy(ident->drv.driver_ver_str, IONIC_DRV_VERSION,
-		sizeof(ident->drv.driver_ver_str) - 1);
+	strscpy(ident->drv.kernel_ver_str, utsname()->version,
+		sizeof(ident->drv.kernel_ver_str));
+	strscpy(ident->drv.driver_ver_str, IONIC_DRV_VERSION,
+		sizeof(ident->drv.driver_ver_str));
 
 	mutex_lock(&ionic->dev_cmd_lock);
 

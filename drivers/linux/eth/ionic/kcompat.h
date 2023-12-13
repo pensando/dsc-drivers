@@ -258,10 +258,6 @@ struct msix_entry {
 #define node_online(node) ((node) == 0)
 #endif
 
-#ifndef cpu_online
-#define cpu_online(cpuid) test_bit((cpuid), &cpu_online_map)
-#endif
-
 #ifndef _LINUX_RANDOM_H
 #include <linux/random.h>
 #endif
@@ -6862,7 +6858,9 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #endif /* 6.1 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE && \
+	(!RHEL_RELEASE_CODE || \
+	  RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(9, 2)))
 #define SET_NETDEV_DEVLINK_PORT(dev, port)   devlink_port_type_eth_set(port, dev)
 #else
 #define devlink_info_driver_name_put(x, y)  0

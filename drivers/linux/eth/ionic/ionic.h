@@ -67,8 +67,6 @@ struct ionic {
 	unsigned int ntxqs_per_lif;
 	unsigned int nrxqs_per_lif;
 	unsigned int nlifs;
-	DECLARE_BITMAP(lifbits, IONIC_LIFS_MAX);
-	DECLARE_BITMAP(ethbits, IONIC_LIFS_MAX);
 	unsigned int nintrs;
 	DECLARE_BITMAP(intrs, IONIC_INTR_CTRL_REGS_MAX);
 #ifndef HAVE_PCI_IRQ_API

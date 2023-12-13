@@ -20,11 +20,14 @@ void ionic_watchdog_cb(struct timer_list *t)
 	struct ionic_deferred_work *work;
 	int hb;
 
-	mod_timer(&ionic->watchdog_timer,
-		  round_jiffies(jiffies + ionic->watchdog_period));
-
 	if (!lif)
 		return;
+
+	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state))
+		return;
+
+	mod_timer(&ionic->watchdog_timer,
+		  round_jiffies(jiffies + ionic->watchdog_period));
 
 	hb = ionic_heartbeat_check(ionic);
 	dev_dbg(ionic->dev, "%s: hb %d running %d UP %d\n",
@@ -176,7 +179,12 @@ void ionic_dev_teardown(struct ionic *ionic)
 /* Devcmd Interface */
 bool ionic_is_fw_running(struct ionic_dev *idev)
 {
-	u8 fw_status = ioread8(&idev->dev_info_regs->fw_status);
+	u8 fw_status;
+
+	if (!idev->dev_info_regs)
+		return false;
+
+	fw_status = ioread8(&idev->dev_info_regs->fw_status);
 
 	/* firmware is useful only if the running bit is set and
 	 * fw_status != 0xff (bad PCI read)
@@ -336,6 +344,7 @@ void ionic_dev_cmd_comp(struct ionic_dev *idev, union ionic_dev_cmd_comp *comp)
 
 void ionic_dev_cmd_go(struct ionic_dev *idev, union ionic_dev_cmd *cmd)
 {
+	idev->opcode = cmd->cmd.opcode;
 	memcpy_toio(&idev->dev_cmd_regs->cmd, cmd, sizeof(*cmd));
 	iowrite32(0, &idev->dev_cmd_regs->done);
 	iowrite32(1, &idev->dev_cmd_regs->doorbell);
