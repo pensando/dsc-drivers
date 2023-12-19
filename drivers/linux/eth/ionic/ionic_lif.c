@@ -51,7 +51,7 @@ struct ionic_dim {
 };
 
 #define IONIC_DIM_DEFAULT_PROFILE_IX 3
-static const struct ionic_dim rx_profile[] = {
+static const struct ionic_dim dim_profile[] = {
 	{1},
 	{2},
 	{4},
@@ -59,35 +59,35 @@ static const struct ionic_dim rx_profile[] = {
 	{16},
 };
 
-static u16 ionic_net_dim_get_rx_moderation(u8 profile_ix)
+static u16 ionic_net_dim_get_moderation(u8 profile_ix)
 {
-	profile_ix = min_t(u8, profile_ix, ARRAY_SIZE(rx_profile));
+	profile_ix = min_t(u8, profile_ix, ARRAY_SIZE(dim_profile));
 
-	return rx_profile[profile_ix].coal_usecs;
+	return dim_profile[profile_ix].coal_usecs;
 }
 
 static void ionic_dim_work(struct work_struct *work)
 {
 	struct dim *dim = container_of(work, struct dim, work);
+	struct ionic_intr_info *intr;
 	struct ionic_qcq *qcq;
+	struct ionic_lif *lif;
 	u16 coal_usecs;
 	u32 new_coal;
 
-	coal_usecs = ionic_net_dim_get_rx_moderation(dim->profile_ix);
+	coal_usecs = ionic_net_dim_get_moderation(dim->profile_ix);
 	qcq = container_of(dim, struct ionic_qcq, dim);
-	new_coal = ionic_coal_usec_to_hw(qcq->q.lif->ionic, coal_usecs);
+	lif = qcq->q.lif;
+	new_coal = ionic_coal_usec_to_hw(lif->ionic, coal_usecs);
 	new_coal = new_coal ? new_coal : 1;
 
-	if (qcq->intr.dim_coal_hw != new_coal) {
-		unsigned int qi = qcq->cq.bound_q->index;
-		struct ionic_lif *lif = qcq->q.lif;
-
-		qcq->intr.dim_coal_hw = new_coal;
-		qcq->intr.dim_coal_usecs = coal_usecs;
+	intr = &qcq->intr;
+	if (intr->dim_coal_hw != new_coal) {
+		intr->dim_coal_hw = new_coal;
+		intr->dim_coal_usecs = coal_usecs;
 
 		ionic_intr_coal_init(lif->ionic->idev.intr_ctrl,
-				     lif->rxqcqs[qi]->intr.index,
-				     qcq->intr.dim_coal_hw);
+				     intr->index, intr->dim_coal_hw);
 	}
 
 	dim->state = DIM_START_MEASURE;
@@ -128,7 +128,8 @@ static void ionic_lif_deferred_work(struct work_struct *work)
 				 * if the FW is already back rather than
 				 * waiting another whole cycle
 				 */
-				mod_timer(&lif->ionic->watchdog_timer, jiffies + 1);
+				if (!test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state))
+					mod_timer(&lif->ionic->watchdog_timer, jiffies + 1);
 			}
 			break;
 		default:
@@ -353,6 +354,7 @@ static int ionic_qcq_disable(struct ionic_lif *lif, struct ionic_qcq *qcq, int f
 	if (qcq->napi.poll) {
 		napi_disable(&qcq->napi);
 		del_timer_sync(&qcq->napi_deadline);
+		synchronize_net();
 	}
 
 	if (qcq->flags & IONIC_QCQ_F_INTR) {
@@ -394,6 +396,7 @@ static void ionic_lif_qcq_deinit(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		ionic_intr_mask(idev->intr_ctrl, qcq->intr.index,
 				IONIC_INTR_MASK_SET);
 		netif_napi_del(&qcq->napi);
+		synchronize_net();
 	}
 
 	qcq->flags &= ~IONIC_QCQ_F_INITED;
@@ -1869,7 +1872,6 @@ static int ionic_set_mac_address(struct net_device *netdev, void *sa)
 	int err;
 
 	mac = (u8 *)addr->sa_data;
-
 	if (ether_addr_equal(netdev->dev_addr, mac))
 		return 0;
 
@@ -3419,6 +3421,9 @@ static void ionic_lif_reset(struct ionic_lif *lif)
 {
 	struct ionic_dev *idev = &lif->ionic->idev;
 
+	if (!ionic_is_fw_running(idev))
+		return;
+
 	mutex_lock(&lif->ionic->dev_cmd_lock);
 	ionic_dev_cmd_lif_reset(idev, lif->index);
 	ionic_dev_cmd_wait(lif->ionic, DEVCMD_TIMEOUT);
@@ -4183,13 +4188,11 @@ try_again:
 		goto try_fewer;
 	}
 
-	/* At this point we have the interrupts we need */
 	ionic->nnqs_per_lif = nnqs_per_lif;
 	ionic->nrdma_eqs_per_lif = nrdma_eqs;
 	ionic->ntxqs_per_lif = nxqs;
 	ionic->nrxqs_per_lif = nxqs;
 	ionic->nintrs = nintrs;
-	ionic->nlifs = 1;
 
 	ionic_debugfs_add_sizes(ionic);
 

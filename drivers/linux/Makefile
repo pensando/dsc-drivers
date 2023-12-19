@@ -56,8 +56,9 @@ include linux_ver.mk
 
 KSRC ?= /lib/modules/$(shell uname -r)/build
 ETH_KOPT += CONFIG_IONIC=m
-ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
+ETH_KOPT += CONFIG_IONIC_MNIC=_
 ETH_KOPT += CONFIG_MDEV=_
+ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=_
 KCFLAGS += -DCONFIG_IONIC
 
 KCFLAGS = -Werror
@@ -68,7 +69,7 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "23.09.1-001"
+    DVER = "23.12.2-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 

@@ -11,6 +11,9 @@
 #include "ionic_lif.h"
 #include "ionic_txrx.h"
 
+#define CREATE_TRACE_POINTS
+#include "ionic_trace.h"
+
 static inline void ionic_txq_post(struct ionic_queue *q, bool ring_dbell,
 				  ionic_desc_cb cb_func, void *cb_arg)
 {
@@ -525,6 +528,14 @@ bool ionic_rx_service(struct ionic_cq *cq, struct ionic_cq_info *cq_info)
 	return true;
 }
 
+static inline void ionic_write_cmb_desc(struct ionic_queue *q,
+					void __iomem *cmb_desc,
+					void *desc)
+{
+	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
+		memcpy_toio(cmb_desc, desc, q->desc_size);
+}
+
 void ionic_rx_fill(struct ionic_queue *q)
 {
 	struct net_device *netdev = q->lif->netdev;
@@ -601,12 +612,10 @@ void ionic_rx_fill(struct ionic_queue *q)
 		}
 
 		desc->opcode = (nfrags > 1) ? IONIC_RXQ_DESC_OPCODE_SG :
-						 IONIC_RXQ_DESC_OPCODE_SIMPLE;
+					      IONIC_RXQ_DESC_OPCODE_SIMPLE;
 		desc_info->nbufs = nfrags;
 
-		/* commit CMB descriptor contents in one shot */
-		if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
-			memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
+		ionic_write_cmb_desc(q, desc_info->cmb_desc, desc);
 
 		ionic_rxq_post(q, false, ionic_rx_clean, NULL);
 	}
@@ -953,6 +962,7 @@ static void ionic_tx_clean(struct ionic_queue *q,
 
 	} else if (unlikely(__netif_subqueue_stopped(q->lif->netdev, qi))) {
 		netif_wake_subqueue(q->lif->netdev, qi);
+		trace_ionic_q_start(q);
 		q->wake++;
 	}
 
@@ -1008,7 +1018,6 @@ void ionic_tx_flush(struct ionic_cq *cq)
 
 	work_done = ionic_cq_service(cq, cq->num_descs,
 				     ionic_tx_service, NULL, NULL);
-
 	if (work_done)
 		ionic_intr_credits(idev->intr_ctrl, cq->bound_intr->index,
 				   work_done, IONIC_INTR_CRED_RESET_COALESCE);
@@ -1113,9 +1122,7 @@ static void ionic_tx_tso_post(struct ionic_queue *q,
 	desc->hdr_len = cpu_to_le16(hdrlen);
 	desc->mss = cpu_to_le16(mss);
 
-	/* commit CMB descriptor contents in one shot */
-	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
-		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
+	ionic_write_cmb_desc(q, desc_info->cmb_desc, desc);
 
 	if (start) {
 		skb_tx_timestamp(skb);
@@ -1298,9 +1305,7 @@ static void ionic_tx_calc_csum(struct ionic_queue *q, struct sk_buff *skb,
 	desc->csum_start = cpu_to_le16(skb_checksum_start_offset(skb));
 	desc->csum_offset = cpu_to_le16(skb->csum_offset);
 
-	/* commit CMB descriptor contents in one shot */
-	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
-		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
+	ionic_write_cmb_desc(q, desc_info->cmb_desc, desc);
 
 #ifdef IONIC_DEBUG_STATS
 #ifdef HAVE_CSUM_NOT_INET
@@ -1345,9 +1350,7 @@ static void ionic_tx_calc_no_csum(struct ionic_queue *q, struct sk_buff *skb,
 	desc->csum_start = 0;
 	desc->csum_offset = 0;
 
-	/* commit CMB descriptor contents in one shot */
-	if (q_to_qcq(q)->flags & IONIC_QCQ_F_CMB_RINGS)
-		memcpy_toio(desc_info->cmb_desc, desc, q->desc_size);
+	ionic_write_cmb_desc(q, desc_info->cmb_desc, desc);
 
 #ifdef IONIC_DEBUG_STATS
 	stats->csum_none++;
@@ -1500,6 +1503,7 @@ static int ionic_maybe_stop_tx(struct ionic_queue *q, int ndescs)
 
 	if (unlikely(!ionic_q_has_space(q, ndescs))) {
 		netif_stop_subqueue(q->lif->netdev, q->index);
+		trace_ionic_q_stop(q);
 		q->stop++;
 		stopped = 1;
 
@@ -1507,6 +1511,7 @@ static int ionic_maybe_stop_tx(struct ionic_queue *q, int ndescs)
 		smp_rmb();
 		if (ionic_q_has_space(q, ndescs)) {
 			netif_wake_subqueue(q->lif->netdev, q->index);
+			trace_ionic_q_start(q);
 			stopped = 0;
 		}
 	}
