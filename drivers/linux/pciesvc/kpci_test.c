@@ -9,9 +9,7 @@
  * Author: rob.gardner@oracle.com
  */
 
-#include "kpcimgr_api.h"
-#include "pciesvc.h"
-#include "pciesvc_system.h"
+#include "pciesvc_impl.h"
 
 #define TICKS_PER_US 200
 #define TICKS_PER_MS  (1000*TICKS_PER_US)
