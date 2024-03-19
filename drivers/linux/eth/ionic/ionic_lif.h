@@ -50,6 +50,9 @@ struct ionic_tx_stats {
 	u64 dma_map_err;
 	u64 hwstamp_valid;
 	u64 hwstamp_invalid;
+#ifdef HAVE_NET_XDP
+	u64 xdp_frames;
+#endif
 };
 
 struct ionic_rx_stats {
@@ -75,6 +78,13 @@ struct ionic_rx_stats {
 	u64 buf_reused;
 	u64 buf_exhausted;
 	u64 buf_not_reusable;
+#ifdef HAVE_NET_XDP
+	u64 xdp_drop;
+	u64 xdp_aborted;
+	u64 xdp_pass;
+	u64 xdp_tx;
+	u64 xdp_redirect;
+#endif
 };
 
 #define IONIC_QCQ_F_INITED		BIT(0)
@@ -102,6 +112,7 @@ struct ionic_qcq {
 	void *sg_base;
 	dma_addr_t sg_base_pa;	/* might not be page aligned */
 	u32 sg_size;
+	unsigned int flags;
 	void __iomem *cmb_q_base;
 	phys_addr_t cmb_q_base_pa;
 	u32 cmb_q_size;
@@ -109,16 +120,15 @@ struct ionic_qcq {
 	u32 cmb_order;
 	bool armed;
 	struct dim dim;
+	struct timer_list napi_deadline;
 	struct ionic_queue q;
 	struct ionic_cq cq;
-	struct ionic_intr_info intr;
-	struct timer_list napi_deadline;
 	struct napi_struct napi;
+	struct ionic_qcq *napi_qcq;
+	struct ionic_intr_info intr;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_napi_stats napi_stats;
 #endif
-	unsigned int flags;
-	struct ionic_qcq *napi_qcq;
 	struct dentry *dentry;
 };
 
@@ -170,6 +180,14 @@ struct ionic_lif_sw_stats {
 	u64 hw_rx_over_errors;
 	u64 hw_rx_missed_errors;
 	u64 hw_tx_aborted_errors;
+#ifdef HAVE_NET_XDP
+	u64 xdp_drop;
+	u64 xdp_aborted;
+	u64 xdp_pass;
+	u64 xdp_tx;
+	u64 xdp_redirect;
+	u64 xdp_frames;
+#endif
 };
 
 enum ionic_lif_state_flags {
@@ -291,6 +309,7 @@ struct ionic_lif {
 	u64 n_txrx_alloc;
 
 	struct dentry *dentry;
+	struct bpf_prog *xdp_prog;
 };
 
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
@@ -386,7 +405,7 @@ static inline bool ionic_is_pf(struct ionic *ionic)
 
 static inline bool ionic_txq_hwstamp_enabled(struct ionic_queue *q)
 {
-	return unlikely(q->features & IONIC_TXQ_F_HWSTAMP);
+	return q->features & IONIC_TXQ_F_HWSTAMP;
 }
 
 void ionic_lif_deferred_enqueue(struct ionic_deferred *def,

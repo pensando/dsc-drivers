@@ -24,6 +24,14 @@ static const struct ionic_stat_desc ionic_lif_stats_desc[] = {
 	IONIC_LIF_STAT_DESC(hw_rx_over_errors),
 	IONIC_LIF_STAT_DESC(hw_rx_missed_errors),
 	IONIC_LIF_STAT_DESC(hw_tx_aborted_errors),
+#ifdef HAVE_NET_XDP
+	IONIC_LIF_STAT_DESC(xdp_drop),
+	IONIC_LIF_STAT_DESC(xdp_aborted),
+	IONIC_LIF_STAT_DESC(xdp_pass),
+	IONIC_LIF_STAT_DESC(xdp_tx),
+	IONIC_LIF_STAT_DESC(xdp_redirect),
+	IONIC_LIF_STAT_DESC(xdp_frames),
+#endif
 };
 
 static const struct ionic_stat_desc ionic_port_stats_desc[] = {
@@ -169,6 +177,9 @@ static const struct ionic_stat_desc ionic_tx_stats_desc[] = {
 	IONIC_TX_STAT_DESC(csum),
 	IONIC_TX_STAT_DESC(csum_none),
 #endif
+#ifdef HAVE_NET_XDP
+	IONIC_TX_STAT_DESC(xdp_frames),
+#endif
 };
 
 static const struct ionic_stat_desc ionic_rx_stats_desc[] = {
@@ -193,6 +204,13 @@ static const struct ionic_stat_desc ionic_rx_stats_desc[] = {
 	IONIC_RX_STAT_DESC(buf_exhausted),
 	IONIC_RX_STAT_DESC(buf_not_reusable),
 	IONIC_RX_STAT_DESC(buf_reused),
+#ifdef HAVE_NET_XDP
+	IONIC_RX_STAT_DESC(xdp_drop),
+	IONIC_RX_STAT_DESC(xdp_aborted),
+	IONIC_RX_STAT_DESC(xdp_pass),
+	IONIC_RX_STAT_DESC(xdp_tx),
+	IONIC_RX_STAT_DESC(xdp_redirect),
+#endif
 };
 
 #ifdef IONIC_DEBUG_STATS
@@ -246,6 +264,9 @@ static void ionic_add_lif_txq_stats(struct ionic_lif *lif, int q_num,
 	stats->tx_csum += txstats->csum;
 	stats->tx_hwstamp_valid += txstats->hwstamp_valid;
 	stats->tx_hwstamp_invalid += txstats->hwstamp_invalid;
+#ifdef HAVE_NET_XDP
+	stats->xdp_frames += txstats->xdp_frames;
+#endif
 }
 
 static void ionic_add_lif_rxq_stats(struct ionic_lif *lif, int q_num,
@@ -260,6 +281,13 @@ static void ionic_add_lif_rxq_stats(struct ionic_lif *lif, int q_num,
 	stats->rx_csum_error += rxstats->csum_error;
 	stats->rx_hwstamp_valid += rxstats->hwstamp_valid;
 	stats->rx_hwstamp_invalid += rxstats->hwstamp_invalid;
+#ifdef HAVE_NET_XDP
+	stats->xdp_drop += rxstats->xdp_drop;
+	stats->xdp_aborted += rxstats->xdp_aborted;
+	stats->xdp_pass += rxstats->xdp_pass;
+	stats->xdp_tx += rxstats->xdp_tx;
+	stats->xdp_redirect += rxstats->xdp_redirect;
+#endif
 }
 
 static void ionic_get_lif_stats(struct ionic_lif *lif,

@@ -1822,6 +1822,7 @@ enum ionic_rss_hash_types {
  * @IONIC_LIF_ATTR_RSS:         LIF RSS attribute
  * @IONIC_LIF_ATTR_STATS_CTRL:  LIF statistics control attribute
  * @IONIC_LIF_ATTR_TXSTAMP:     LIF TX timestamping mode
+ * @IONIC_LIF_ATTR_MGMT_IPV4:   LIF internal mgmt ipv4 address
  */
 enum ionic_lif_attr {
 	IONIC_LIF_ATTR_STATE        = 0,
@@ -1832,6 +1833,8 @@ enum ionic_lif_attr {
 	IONIC_LIF_ATTR_RSS          = 5,
 	IONIC_LIF_ATTR_STATS_CTRL   = 6,
 	IONIC_LIF_ATTR_TXSTAMP      = 7,
+	IONIC_LIF_ATTR_MGMT_IPV4    = 254,
+	IONIC_LIF_ATTR_MAX          = 255,
 };
 
 /**
@@ -1850,6 +1853,7 @@ enum ionic_lif_attr {
  *              @addr:      Address for the indirection table shared memory
  * @stats_ctl:  stats control commands (enum ionic_stats_ctl_cmd)
  * @txstamp:    TX Timestamping Mode (enum ionic_txstamp_mode)
+ * @mgmt_ipv4:  ip address to set on internal mgmt interface
  */
 struct ionic_lif_setattr_cmd {
 	u8     opcode;
@@ -1869,6 +1873,10 @@ struct ionic_lif_setattr_cmd {
 		} rss;
 		u8      stats_ctl;
 		__le16  txstamp_mode;
+		struct {
+			__be32 addr;
+			u8     subnet;
+		} mgmt_ipv4;
 		u8      rsvd[60];
 	} __attribute__((packed));
 };

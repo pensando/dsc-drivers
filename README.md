@@ -199,3 +199,8 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - updates from upstream kernel fixes
  - updates to FLR handling
  - added AER error handling
+
+24-03-19 - driver update for 24.03.1-002
+ - Add XDP support
+ - Refactor Tx and Rx fast paths for performance
+ - Refactor struct sizes, layout, and usage for memory savings and performance

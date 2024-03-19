@@ -127,18 +127,23 @@ static void ionic_get_regs(struct net_device *netdev, struct ethtool_regs *regs,
 			   void *p)
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
+	struct ionic_dev *idev;
 	unsigned int offset;
 	unsigned int size;
 
 	regs->version = IONIC_DEV_CMD_REG_VERSION;
 
+	idev = &lif->ionic->idev;
+	if (!idev->dev_info_regs)
+		return;
+
 	offset = 0;
 	size = IONIC_DEV_INFO_REG_COUNT * sizeof(u32);
-	memcpy_fromio(p + offset, lif->ionic->idev.dev_info_regs->words, size);
+	memcpy_fromio(p + offset, idev->dev_info_regs->words, size);
 
 	offset += size;
 	size = IONIC_DEV_CMD_REG_COUNT * sizeof(u32);
-	memcpy_fromio(p + offset, lif->ionic->idev.dev_cmd_regs->words, size);
+	memcpy_fromio(p + offset, idev->dev_cmd_regs->words, size);
 }
 
 #if (KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE)
@@ -915,6 +920,11 @@ static int ionic_set_channels(struct net_device *netdev,
 		return -EINVAL;
 	}
 
+	if ((ch->rx_count || ch->tx_count) && lif->xdp_prog) {
+		netdev_info(lif->netdev, "Split Tx/Rx interrupts not available when using XDP\n");
+		return -EOPNOTSUPP;
+	}
+
 	if (ch->rx_count != ch->tx_count) {
 		netdev_info(netdev, "The rx and tx count must be equal\n");
 		return -EINVAL;
@@ -1072,7 +1082,10 @@ static u32 ionic_get_rxfh_key_size(struct net_device *netdev)
 	return IONIC_RSS_HASH_KEY_SIZE;
 }
 
-#ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_RXFN_EXTACK
+static int ionic_get_rxfh(struct net_device *netdev,
+			  struct ethtool_rxfh_param *rxfh)
+#elif defined(HAVE_RXFH_HASHFUNC)
 static int ionic_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key,
 			  u8 *hfunc)
 #else
@@ -1080,7 +1093,13 @@ static int ionic_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 #endif
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
-	unsigned int i, tbl_sz;
+#ifdef HAVE_RXFN_EXTACK
+	u32 *indir = rxfh->indir;
+	u8 *hfunc = &rxfh->hfunc;
+	u8 *key = rxfh->key;
+#endif
+	unsigned int tbl_sz;
+	unsigned int i;
 
 	if (indir) {
 		tbl_sz = le16_to_cpu(lif->ionic->ident.lif.eth.rss_ind_tbl_sz);
@@ -1099,7 +1118,11 @@ static int ionic_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 	return 0;
 }
 
-#ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_RXFN_EXTACK
+static int ionic_set_rxfh(struct net_device *netdev,
+			  struct ethtool_rxfh_param *rxfh,
+			  struct netlink_ext_ack *extack)
+#elif defined(HAVE_RXFH_HASHFUNC)
 static int ionic_set_rxfh(struct net_device *netdev, const u32 *indir,
 			  const u8 *key, const u8 hfunc)
 #else
@@ -1108,12 +1131,16 @@ static int ionic_set_rxfh(struct net_device *netdev, const u32 *indir,
 #endif
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
+#ifdef HAVE_RXFN_EXTACK
+	u32 *indir = rxfh->indir;
+	u8 hfunc = rxfh->hfunc;
+	u8 *key = rxfh->key;
+#endif
 
 #ifdef HAVE_RXFH_HASHFUNC
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
 		return -EOPNOTSUPP;
 #endif
-
 	return ionic_lif_rss_config(lif, lif->rss_types, key, indir);
 }
 
@@ -1173,7 +1200,7 @@ static int ionic_get_module_info(struct net_device *netdev,
 		break;
 	case SFF8024_ID_UNK:
 		if (lif->ionic->is_mgmt_nic)
-			netdev_info(netdev, "no xcvr on mgmt nic\n");
+			netdev_dbg(netdev, "no xcvr on mgmt nic\n");
 		else
 			netdev_info(netdev, "no xcvr connected? type 0x%02x\n",
 				    xcvr->sprom[0]);
