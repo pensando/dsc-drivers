@@ -47,6 +47,9 @@ static int ionic_dl_info_get(struct devlink *dl, struct devlink_info_req *req,
 	int err = 0;
 	u32 val;
 
+	if (!idev->dev_cmd_regs)
+		return -ENXIO;
+
 	err = devlink_info_driver_name_put(req, IONIC_DRV_NAME);
 	if (err)
 		return err;

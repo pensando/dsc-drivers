@@ -60,7 +60,6 @@ void ionic_api_request_reset(void *handle)
 
 	if (err) {
 		netdev_warn(lif->netdev, "request_reset: error %d\n", err);
-		return;
 	}
 
 	if (lif->child_lif_cfg.priv &&
@@ -85,8 +84,9 @@ int ionic_api_set_private(void *handle, void *priv,
 			  enum ionic_api_prsn prsn)
 {
 	struct ionic_lif *lif = handle;
-	struct ionic_lif_cfg *cfg = &lif->child_lif_cfg;
+	struct ionic_lif_cfg *cfg;
 
+	cfg = &lif->child_lif_cfg;
 	if (priv && cfg->priv)
 		return -EBUSY;
 
@@ -137,8 +137,8 @@ EXPORT_SYMBOL_GPL(ionic_api_get_identity);
 
 int ionic_api_get_intr(void *handle, int *irq)
 {
-	struct ionic_lif *lif = handle;
 	struct ionic_intr_info *intr_obj;
+	struct ionic_lif *lif = handle;
 	int err;
 
 	if (!lif->nrdma_eqs_avail)

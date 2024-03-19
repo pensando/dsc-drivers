@@ -901,6 +901,9 @@ struct _kc_ethtool_pauseparam {
 /* SLES12 SP4 GM is 4.12.14-94.41 and update kernel is 4.12.14-95.x. */
 #define SLE_VERSION_CODE SLE_VERSION(12,4,0)
 #elif (LINUX_VERSION_CODE == KERNEL_VERSION(4,12,14) && \
+       (SLE_LOCALVERSION_CODE == KERNEL_VERSION(115,0,0)))
+#define SLE_VERSION_CODE SLE_VERSION(12,5,0)
+#elif (LINUX_VERSION_CODE == KERNEL_VERSION(4,12,14) && \
        (SLE_LOCALVERSION_CODE == KERNEL_VERSION(23,0,0) || \
         SLE_LOCALVERSION_CODE == KERNEL_VERSION(2,0,0) || \
         SLE_LOCALVERSION_CODE == KERNEL_VERSION(136,0,0) || \
@@ -6535,6 +6538,32 @@ static inline bool __kc_napi_if_scheduled_mark_missed(struct napi_struct *n)
 #define napi_if_scheduled_mark_missed __kc_napi_if_scheduled_mark_missed
 #endif /* !napi_if_scheduled_mark_missed */
 #endif /* HAVE_AF_XDP_SUPPORT */
+#if (!RHEL_RELEASE_CODE && !SLE_VERSION_CODE || \
+     (RHEL_RELEASE_CODE && \
+      ((RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,7)) || \
+       (RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8,0)))) || \
+     (SLE_VERSION_CODE && \
+      (SLE_LOCALVERSION_CODE < SLE_LOCALVERSION(115,0,0))))
+/* Variant of netdev_tx_sent_queue() for drivers that are aware
+ * that they should not test BQL status themselves.
+ * We do want to change __QUEUE_STATE_STACK_XOFF only for the last
+ * skb of a batch.
+ * Returns true if the doorbell must be used to kick the NIC.
+ */
+static inline bool __netdev_tx_sent_queue(struct netdev_queue *dev_queue,
+					  unsigned int bytes,
+					  bool xmit_more)
+{
+	if (xmit_more) {
+#ifdef CONFIG_BQL
+		dql_queued(&dev_queue->dql, bytes);
+#endif
+		return netif_tx_queue_stopped(dev_queue);
+	}
+	netdev_tx_sent_queue(dev_queue, bytes);
+	return true;
+}
+#endif /* (!RHEL && !SLES) || (RHEL < 7.7 || RHEL == 8.0) || (SLES <= 12.5-115) */
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,0)))
 #define HAVE_DEVLINK_ESWITCH_OPS_EXTACK
 #endif /* RHEL >= 8.0 */
@@ -6812,15 +6841,35 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 7) <= RHEL_RELEASE_CODE && \
 			   RHEL_RELEASE_VERSION(9, 0) != RHEL_RELEASE_CODE))
 #define HAVE_RINGPARAM_EXTACK
+#else
+#define txq_trans_cond_update txq_trans_update
 #endif
 
 #else
 #define HAVE_RINGPARAM_EXTACK
 #endif /* 5.17 */
 
+#ifndef PCI_ERROR_RESPONSE
+#define PCI_ERROR_RESPONSE		(~0ULL)
+#define PCI_SET_ERROR_RESPONSE(val)	(*(val) = ((typeof(*(val)))PCI_ERROR_RESPONSE))
+#define PCI_POSSIBLE_ERROR(val)		((val) == ((typeof(val))PCI_ERROR_RESPONSE))
+#endif
+
 /*****************************************************************************/
 #if (KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE)
 #define vcalloc(a, b)	vzalloc((a) * (b))
+
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 5) <= RHEL_RELEASE_CODE))
+#define HAVE_NET_XDP
+#endif
+
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(9, 2) <= RHEL_RELEASE_CODE))
+#define HAVE_NET_XDP_FRAGS
+#endif /* RHEL 9.2 */
+#else
+#define HAVE_NET_XDP
+#define HAVE_NET_XDP_FRAGS
+
 #endif /* 5.18 */
 
 /*****************************************************************************/
@@ -6871,6 +6920,26 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #else
 #define HAVE_RX_PUSH
 #endif /* 6.3 */
+
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 5, 0) > LINUX_VERSION_CODE)
+#ifdef HAVE_NET_XDP_FRAGS
+static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
+					   struct page *page,
+					   int off, int size)
+{
+	frag->bv_page = page;
+	frag->bv_offset = off;
+	skb_frag_size_set(frag, size);
+}
+#endif /* HAVE_NET_XDP_FRAGS */
+#endif /* 6.5.0 */
+
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#else
+#define HAVE_RXFN_EXTACK
+#endif /* 6.8.0 */
 
 /* We don't support PTP on older RHEL kernels (needs more compat work) */
 #if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))

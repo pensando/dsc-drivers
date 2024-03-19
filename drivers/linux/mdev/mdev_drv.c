@@ -664,7 +664,7 @@ static void __exit mdev_cleanup(void)
 module_init(mdev_init);
 module_exit(mdev_cleanup);
 
-MODULE_AUTHOR("Pensando Systems");
+MODULE_AUTHOR("Dhruval Shah <dhruval.shah@amd.com>");
 MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
