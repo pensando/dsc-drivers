@@ -80,6 +80,7 @@ struct ionic {
 	struct rw_semaphore vf_op_lock;	/* lock for VF operations */
 	struct ionic_vf *vfs;
 	int num_vfs;
+	struct timer_list doorbell_timer;
 	struct timer_list watchdog_timer;
 	int watchdog_period;
 };
