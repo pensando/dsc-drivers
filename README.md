@@ -195,12 +195,15 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - fix 16bit math issue when PAGE_SIZE >= 64KB
  - restrict page-cache allocation to Rx queues
 
-23-12-14 - driver update for 23.12.2-001
+2023-12-14 - driver update for 23.12.2-001
  - updates from upstream kernel fixes
  - updates to FLR handling
  - added AER error handling
 
-24-03-19 - driver update for 24.03.1-002
+2024-03-19 - driver update for 24.03.1-002
  - Add XDP support
  - Refactor Tx and Rx fast paths for performance
  - Refactor struct sizes, layout, and usage for memory savings and performance
+
+2024-04-03 - driver update for 24.03.4-002
+ - Fix to reduce impact of missed doorbell workaround

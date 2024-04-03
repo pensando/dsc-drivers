@@ -120,7 +120,6 @@ struct ionic_qcq {
 	u32 cmb_order;
 	bool armed;
 	struct dim dim;
-	struct timer_list napi_deadline;
 	struct ionic_queue q;
 	struct ionic_cq cq;
 	struct napi_struct napi;
@@ -142,6 +141,7 @@ enum ionic_deferred_work_type {
 	IONIC_DW_TYPE_RX_MODE,
 	IONIC_DW_TYPE_LINK_STATUS,
 	IONIC_DW_TYPE_LIF_RESET,
+	IONIC_DW_TYPE_DOORBELL,
 };
 
 struct ionic_deferred_work {
