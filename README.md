@@ -207,3 +207,6 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 
 2024-04-03 - driver update for 24.03.4-002
  - Fix to reduce impact of missed doorbell workaround
+
+24-04-16 - driver update for 24.03.4-003
+ - Doorbell workaround now uses AdminQ's last used cpu

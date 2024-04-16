@@ -519,6 +519,16 @@ static int lif_n_txrx_alloc_show(struct seq_file *seq, void *v)
 }
 DEFINE_SHOW_ATTRIBUTE(lif_n_txrx_alloc);
 
+static int lif_adminq_cpu_show(struct seq_file *seq, void *v)
+{
+	struct ionic_lif *lif = seq->private;
+
+	seq_printf(seq, "%u\n", lif->adminq_cpu);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(lif_adminq_cpu);
+
 void ionic_debugfs_add_lif(struct ionic_lif *lif)
 {
 	struct dentry *lif_dentry;
@@ -538,6 +548,8 @@ void ionic_debugfs_add_lif(struct ionic_lif *lif)
 			    lif, &lif_filters_fops);
 	debugfs_create_file("txrx_alloc", 0400, lif->dentry,
 			    lif, &lif_n_txrx_alloc_fops);
+	debugfs_create_file("adminq_cpu", 0400, lif->dentry,
+			    lif, &lif_adminq_cpu_fops);
 }
 
 void ionic_debugfs_del_lif(struct ionic_lif *lif)

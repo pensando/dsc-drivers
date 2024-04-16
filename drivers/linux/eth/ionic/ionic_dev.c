@@ -48,7 +48,7 @@ void ionic_watchdog_cb(struct timer_list *t)
 
 		work->type = IONIC_DW_TYPE_RX_MODE;
 		netdev_dbg(lif->netdev, "deferred: rx_mode\n");
-		ionic_lif_deferred_enqueue(&lif->deferred, work);
+		ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 	}
 }
 
@@ -86,11 +86,11 @@ void ionic_doorbell_cb(struct timer_list *timer)
 		work = kzalloc(sizeof(*work), GFP_ATOMIC);
 		if (work) {
 			work->type = IONIC_DW_TYPE_DOORBELL;
-			ionic_lif_deferred_enqueue(&lif->deferred, work);
+			ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 		}
 	}
 
-	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_NAPI_DEADLINE);
+	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_ADMIN_DOORBELL_DEADLINE);
 }
 
 void ionic_init_devinfo(struct ionic *ionic)
@@ -302,7 +302,7 @@ do_check_time:
 			if (work) {
 				work->type = IONIC_DW_TYPE_LIF_RESET;
 				work->fw_status = fw_status_ready;
-				ionic_lif_deferred_enqueue(&lif->deferred, work);
+				ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 			}
 		}
 	}

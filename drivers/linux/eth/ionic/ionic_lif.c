@@ -118,7 +118,6 @@ static void ionic_doorbell_check(struct ionic_lif *lif)
 		if (lif->hwstamp_rxq &&
 		    lif->hwstamp_rxq->flags & IONIC_QCQ_F_INTR)
 			napi_schedule(&lif->hwstamp_rxq->napi);
-
 	}
 	mutex_unlock(&lif->queue_lock);
 }
@@ -173,13 +172,14 @@ static void ionic_lif_deferred_work(struct work_struct *work)
 	} while (true);
 }
 
-void ionic_lif_deferred_enqueue(struct ionic_deferred *def,
+void ionic_lif_deferred_enqueue(struct ionic_lif *lif,
+				struct ionic_deferred *def,
 				struct ionic_deferred_work *work)
 {
 	spin_lock_bh(&def->lock);
 	list_add_tail(&work->list, &def->list);
 	spin_unlock_bh(&def->lock);
-	schedule_work(&def->work);
+	schedule_work_on(lif->adminq_cpu, &def->work);
 }
 
 static void ionic_link_status_check(struct ionic_lif *lif)
@@ -256,7 +256,7 @@ void ionic_link_status_check_request(struct ionic_lif *lif, bool can_sleep)
 		}
 
 		work->type = IONIC_DW_TYPE_LINK_STATUS;
-		ionic_lif_deferred_enqueue(&lif->deferred, work);
+		ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 	} else {
 		ionic_link_status_check(lif);
 	}
@@ -534,7 +534,6 @@ static void ionic_link_qcq_interrupts(struct ionic_qcq *src_qcq,
 
 	n_qcq->intr.vector = src_qcq->intr.vector;
 	n_qcq->intr.index = src_qcq->intr.index;
-	n_qcq->napi_qcq = src_qcq->napi_qcq;
 }
 
 static int ionic_alloc_qcq_interrupt(struct ionic_lif *lif, struct ionic_qcq *qcq)
@@ -926,10 +925,8 @@ static int ionic_lif_txq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 	q->dbell_deadline = IONIC_TX_DOORBELL_DEADLINE;
 	q->dbell_jiffies = jiffies;
 
-	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state)) {
+	if (test_bit(IONIC_LIF_F_SPLIT_INTR, lif->state))
 		netif_napi_add(lif->netdev, &qcq->napi, ionic_tx_napi);
-		qcq->napi_qcq = qcq;
-	}
 
 	qcq->flags |= IONIC_QCQ_F_INITED;
 
@@ -1006,8 +1003,6 @@ static int ionic_lif_rxq_init(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		netif_napi_add(lif->netdev, &qcq->napi, ionic_rx_napi);
 	else
 		netif_napi_add(lif->netdev, &qcq->napi, ionic_txrx_napi);
-
-	qcq->napi_qcq = qcq;
 
 	qcq->flags |= IONIC_QCQ_F_INITED;
 
@@ -1306,6 +1301,8 @@ static int ionic_adminq_napi(struct napi_struct *napi, int budget)
 	if (lif->hwstamp_txq && !tx_work)
 		ionic_txq_poke_doorbell(&lif->hwstamp_txq->q);
 
+	lif->adminq_cpu = smp_processor_id();
+
 	return work_done;
 }
 
@@ -1488,7 +1485,7 @@ static void ionic_ndo_set_rx_mode(struct net_device *netdev)
 	}
 	work->type = IONIC_DW_TYPE_RX_MODE;
 	netdev_dbg(lif->netdev, "deferred: rx_mode\n");
-	ionic_lif_deferred_enqueue(&lif->deferred, work);
+	ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 }
 
 static __le64 ionic_netdev_features_to_nic(netdev_features_t features)
@@ -3785,8 +3782,6 @@ static int ionic_lif_adminq_init(struct ionic_lif *lif)
 
 	netif_napi_add(lif->netdev, &qcq->napi, ionic_adminq_napi);
 
-	qcq->napi_qcq = qcq;
-
 	napi_enable(&qcq->napi);
 
 	if (qcq->flags & IONIC_QCQ_F_INTR) {
@@ -3797,6 +3792,13 @@ static int ionic_lif_adminq_init(struct ionic_lif *lif)
 	}
 
 	qcq->flags |= IONIC_QCQ_F_INITED;
+
+	/* Start the tracking with the current cpu rather than the
+	 * default 0 starting place.  This helps spread the scheduled
+	 * work item load when VFs are brought up on multiple PFs by
+	 * userland commands that will be on various cpus.
+	 */
+	lif->adminq_cpu = smp_processor_id();
 
 	return 0;
 }

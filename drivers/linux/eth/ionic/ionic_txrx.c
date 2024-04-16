@@ -1022,6 +1022,9 @@ void ionic_rx_fill(struct ionic_queue *q)
 
 	ionic_dbell_ring(q->lif->kern_dbpage, q->hw_type,
 			 q->dbval | q->head_idx);
+
+	q->dbell_deadline = IONIC_RX_MIN_DOORBELL_DEADLINE;
+	q->dbell_jiffies = jiffies;
 }
 
 void ionic_rx_empty(struct ionic_queue *q)
