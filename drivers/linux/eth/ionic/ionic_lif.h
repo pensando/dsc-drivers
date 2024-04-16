@@ -120,11 +120,9 @@ struct ionic_qcq {
 	u32 cmb_order;
 	bool armed;
 	struct dim dim;
-	struct timer_list napi_deadline;
 	struct ionic_queue q;
 	struct ionic_cq cq;
 	struct napi_struct napi;
-	struct ionic_qcq *napi_qcq;
 	struct ionic_intr_info intr;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_napi_stats napi_stats;
@@ -142,6 +140,7 @@ enum ionic_deferred_work_type {
 	IONIC_DW_TYPE_RX_MODE,
 	IONIC_DW_TYPE_LINK_STATUS,
 	IONIC_DW_TYPE_LIF_RESET,
+	IONIC_DW_TYPE_DOORBELL,
 };
 
 struct ionic_deferred_work {
@@ -270,6 +269,7 @@ struct ionic_lif {
 	unsigned int index;
 	unsigned int hw_index;
 	unsigned int link_down_count;
+	unsigned int adminq_cpu;
 
 	u8 rss_hash_key[IONIC_RSS_HASH_KEY_SIZE];
 	u8 *rss_ind_tbl;
@@ -408,7 +408,8 @@ static inline bool ionic_txq_hwstamp_enabled(struct ionic_queue *q)
 	return q->features & IONIC_TXQ_F_HWSTAMP;
 }
 
-void ionic_lif_deferred_enqueue(struct ionic_deferred *def,
+void ionic_lif_deferred_enqueue(struct ionic_lif *lif,
+				struct ionic_deferred *def,
 				struct ionic_deferred_work *work);
 void ionic_link_status_check_request(struct ionic_lif *lif, bool can_sleep);
 #ifdef HAVE_VOID_NDO_GET_STATS64

@@ -438,6 +438,7 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_out_deregister_devlink;
 	}
 
+	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_NAPI_DEADLINE);
 	mod_timer(&ionic->watchdog_timer,
 		  round_jiffies(jiffies + ionic->watchdog_period));
 
@@ -470,6 +471,7 @@ static void ionic_remove(struct pci_dev *pdev)
 	if (ionic->lif)
 		set_bit(IONIC_LIF_F_IN_SHUTDOWN, ionic->lif->state);
 
+	del_timer_sync(&ionic->doorbell_timer);
 	del_timer_sync(&ionic->watchdog_timer);
 
 	if (ionic->lif) {
@@ -509,6 +511,7 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	 * scheduled and render these del/cancel calls useless (i.e. don't mix
 	 * device triggered resets with userspace triggered resets).
 	 */
+	del_timer_sync(&ionic->doorbell_timer);
 	del_timer_sync(&ionic->watchdog_timer);
 
 	mutex_lock(&lif->queue_lock);
@@ -542,6 +545,7 @@ void ionic_reset_done(struct pci_dev *pdev)
 	if (err)
 		goto err_out;
 
+	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_NAPI_DEADLINE);
 	mod_timer(&ionic->watchdog_timer, jiffies + 1);
 
 err_out:

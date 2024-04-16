@@ -48,7 +48,7 @@ void ionic_watchdog_cb(struct timer_list *t)
 
 		work->type = IONIC_DW_TYPE_RX_MODE;
 		netdev_dbg(lif->netdev, "deferred: rx_mode\n");
-		ionic_lif_deferred_enqueue(&lif->deferred, work);
+		ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 	}
 }
 
@@ -71,6 +71,26 @@ void ionic_watchdog_init(struct ionic *ionic)
 	idev->fw_status_ready = true;
 	idev->fw_generation = IONIC_FW_STS_F_GENERATION &
 			      ioread8(&idev->dev_info_regs->fw_status);
+}
+
+void ionic_doorbell_cb(struct timer_list *timer)
+{
+	struct ionic *ionic = container_of(timer, struct ionic, doorbell_timer);
+	struct ionic_lif *lif = ionic->lif;
+	struct ionic_deferred_work *work;
+
+	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state))
+		return;
+
+	if (!test_bit(IONIC_LIF_F_FW_RESET, lif->state)) {
+		work = kzalloc(sizeof(*work), GFP_ATOMIC);
+		if (work) {
+			work->type = IONIC_DW_TYPE_DOORBELL;
+			ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
+		}
+	}
+
+	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_ADMIN_DOORBELL_DEADLINE);
 }
 
 void ionic_init_devinfo(struct ionic *ionic)
@@ -137,6 +157,7 @@ int ionic_dev_setup(struct ionic *ionic)
 		return -EFAULT;
 	}
 
+	timer_setup(&ionic->doorbell_timer, ionic_doorbell_cb, 0);
 	ionic_watchdog_init(ionic);
 
 	idev->db_pages = bar->vaddr;
@@ -281,7 +302,7 @@ do_check_time:
 			if (work) {
 				work->type = IONIC_DW_TYPE_LIF_RESET;
 				work->fw_status = fw_status_ready;
-				ionic_lif_deferred_enqueue(&lif->deferred, work);
+				ionic_lif_deferred_enqueue(lif, &lif->deferred, work);
 			}
 		}
 	}
@@ -724,10 +745,6 @@ void ionic_q_post(struct ionic_queue *q, bool ring_doorbell)
 				 q->dbval | q->head_idx);
 
 		q->dbell_jiffies = jiffies;
-
-		if (q_to_qcq(q)->napi_qcq)
-			mod_timer(&q_to_qcq(q)->napi_qcq->napi_deadline,
-				  jiffies + IONIC_NAPI_DEADLINE);
 	}
 }
 

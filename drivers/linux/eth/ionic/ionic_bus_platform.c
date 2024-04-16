@@ -222,6 +222,8 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 		return -EFAULT;
 
 	ionic_init_devinfo(ionic);
+
+	timer_setup(&ionic->doorbell_timer, ionic_doorbell_cb, 0);
 	ionic_watchdog_init(ionic);
 
 	idev->db_pages = ionic->bars[IONIC_DOORBELL_BAR].vaddr;
@@ -403,6 +405,7 @@ int ionic_probe(struct platform_device *pfdev)
 		goto err_out_deinit_lifs;
 	}
 
+	mod_timer(&ionic->doorbell_timer, jiffies + IONIC_NAPI_DEADLINE);
 	mod_timer(&ionic->watchdog_timer,
 		  round_jiffies(jiffies + ionic->watchdog_period));
 
@@ -430,6 +433,7 @@ int ionic_remove(struct platform_device *pfdev)
 	struct ionic *ionic = platform_get_drvdata(pfdev);
 
 	if (ionic) {
+		del_timer_sync(&ionic->doorbell_timer);
 		del_timer_sync(&ionic->watchdog_timer);
 		ionic_lif_unregister(ionic->lif);
 		ionic_lif_deinit(ionic->lif);
