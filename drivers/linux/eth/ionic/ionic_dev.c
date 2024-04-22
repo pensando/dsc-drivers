@@ -62,8 +62,7 @@ void ionic_doorbell_napi_work(struct work_struct *work)
 	then = qcq->q.dbell_jiffies;
 	dif = now - then;
 
-	/* Use a larger check value here to minimize impact */
-	if (dif > IONIC_NAPI_DEADLINE / 2)
+	if (dif > qcq->q.dbell_deadline)
 		napi_schedule(&qcq->napi);
 }
 
