@@ -204,3 +204,7 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - Add XDP support
  - Refactor Tx and Rx fast paths for performance
  - Refactor struct sizes, layout, and usage for memory savings and performance
+
+24-04-25 - driver update for 24.04.2-002
+ - reworked ionic's missed-doorbell fix to reduce latency and throughput issues seen
+ - ionic_mnic work in preparation for future platform device model changes
