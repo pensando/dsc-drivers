@@ -32,9 +32,9 @@ struct ionic_intr_msixcfg {
 	__le32 vector_ctrl;
 };
 
-static void *ionic_intr_msixcfg_addr(struct device *mnic_dev, const int intr)
+static void __iomem *ionic_intr_msixcfg_addr(struct device *mnic_dev, const int intr)
 {
-	struct ionic_dev *idev = (struct ionic_dev *) mnic_dev->platform_data;
+	struct ionic_dev *idev = (struct ionic_dev *)mnic_dev->platform_data;
 
 	dev_info(mnic_dev, "msix_cfg_base: %p\n", idev->msix_cfg_base);
 	return (idev->msix_cfg_base + (intr * IONIC_INTR_MSIXCFG_STRIDE));
@@ -44,7 +44,7 @@ static void ionic_intr_msixcfg(struct device *mnic_dev,
 			       const int intr, const u64 msgaddr,
 			       const u32 msgdata, const int vctrl)
 {
-	void *pa = ionic_intr_msixcfg_addr(mnic_dev, intr);
+	void __iomem *pa = ionic_intr_msixcfg_addr(mnic_dev, intr);
 
 	writeq(msgaddr, (pa + offsetof(struct ionic_intr_msixcfg, msgaddr)));
 	writel(msgdata, (pa + offsetof(struct ionic_intr_msixcfg, msgdata)));
@@ -60,7 +60,7 @@ static void ionic_intr_msixcfg(struct device *mnic_dev,
  * resource for use by multiple ionic devices.
  */
 struct ionic_shared_resource {
-	struct mutex lock;
+	struct mutex lock;	/* shared resource lock */
 	void __iomem *base;
 	int refs;
 };
@@ -77,15 +77,14 @@ static void __iomem *ionic_ioremap_shared_resource(struct ionic_shared_resource 
 	if (shres->refs) {
 		base = shres->base;
 		++shres->refs;
+	} else if (!request_mem_region(res->start, resource_size(res),
+				       res->name ?: KBUILD_MODNAME)) {
+		base = IOMEM_ERR_PTR(-EBUSY);
 	} else {
-		if (!request_mem_region(res->start, resource_size(res), res->name ?: KBUILD_MODNAME)) {
-			base = IOMEM_ERR_PTR(-EBUSY);
-		} else {
-			base = ioremap(res->start, resource_size(res));
-			if (!IS_ERR_OR_NULL(base)) {
-				shres->base = base;
-				++shres->refs;
-			}
+		base = ioremap(res->start, resource_size(res));
+		if (!IS_ERR_OR_NULL(base)) {
+			shres->base = base;
+			++shres->refs;
 		}
 	}
 
@@ -129,16 +128,15 @@ int ionic_bus_get_irq(struct ionic *ionic, unsigned int num)
 
 	for_each_msi_entry(desc, ionic->dev) {
 		if (i == num) {
-			pr_info("[i = %d] msi_entry: %d.%d\n",
-				i, desc->platform.msi_index,
-				desc->irq);
+			dev_info(ionic->dev, "[i = %d] msi_entry: %d.%d\n",
+				 i, desc->platform.msi_index, desc->irq);
 
 			return desc->irq;
 		}
 		i++;
 	}
 
-	return -1; //return error if user is asking more irqs than allocated
+	return -EINVAL;
 }
 
 const char *ionic_bus_info(struct ionic *ionic)
@@ -153,8 +151,8 @@ static void ionic_mnic_set_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 		msg->address_lo, msg->data);
 
 	ionic_intr_msixcfg(desc->dev, desc->platform.msi_index,
-		     (((u64)msg->address_hi << 32) | msg->address_lo),
-		     msg->data, 0/*vctrl*/);
+			   (((u64)msg->address_hi << 32) | msg->address_lo),
+			   msg->data, 0/*vctrl*/);
 }
 
 int ionic_bus_alloc_irq_vectors(struct ionic *ionic, unsigned int nintrs)
@@ -174,32 +172,12 @@ void ionic_bus_free_irq_vectors(struct ionic *ionic)
 	platform_msi_domain_free_irqs(ionic->dev);
 }
 
-struct net_device *ionic_alloc_netdev(struct ionic *ionic)
-{
-	struct net_device *netdev = NULL;
-	struct ionic_lif *lif;
-
-	netdev = alloc_netdev_mqs(sizeof(struct ionic_lif), ionic->pfdev->name,
-				  NET_NAME_USER, ether_setup,
-				  ionic->ntxqs_per_lif, ionic->ntxqs_per_lif);
-	if (!netdev)
-		return netdev;
-
-	lif = netdev_priv(netdev);
-
-	/* lif name is used for naming the interrupt handler so better
-	 * to name them differently for mnic
-	 */
-	snprintf(lif->name, sizeof(lif->name), "%s-", ionic->pfdev->name);
-
-	return netdev;
-}
-
 static int ionic_mnic_dev_setup(struct ionic *ionic)
 {
 	unsigned int num_bars = ionic->num_bars;
 	struct ionic_dev *idev = &ionic->idev;
 	u32 sig;
+	int err;
 
 	if (num_bars < IONIC_REQUIRED_BARS)
 		return -EFAULT;
@@ -214,15 +192,26 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 	else
 		idev->hwstamp_regs = NULL;
 
-	/* save the idev into dev->platform_data so we can use it later */
+	/* retrieve the application-assigned netdev name
+	 * before we use platform_data for something else
+	 */
+	ionic->mnet_netdev_name = (const char *)ionic->dev->platform_data;
+
+	/* save the idev into dev->platform_data so we can
+	 * use it later when setting up msixcfg
+	 */
 	ionic->dev->platform_data = idev;
 
 	sig = ioread32(&idev->dev_info_regs->signature);
-	if (sig != IONIC_DEV_INFO_SIGNATURE)
+	if (sig != IONIC_DEV_INFO_SIGNATURE) {
+		dev_err(ionic->dev, "Incompatible firmware signature %x", sig);
 		return -EFAULT;
+	}
 
 	ionic_init_devinfo(ionic);
-	ionic_watchdog_init(ionic);
+	err = ionic_watchdog_init(ionic);
+	if (err)
+		return err;
 
 	idev->db_pages = ionic->bars[IONIC_DOORBELL_BAR].vaddr;
 	idev->phy_db_pages = ionic->bars[IONIC_DOORBELL_BAR].bus_addr;
@@ -238,8 +227,19 @@ static int ionic_map_bars(struct ionic *ionic)
 	struct ionic_dev_bar *bars = ionic->bars;
 	struct device *dev = ionic->dev;
 	struct resource *res;
+	void __iomem *base;
 	unsigned int i, j;
-	void *base;
+
+	/* If there are no resources then the probe is happening early,
+	 * before the rest of the firmware has had a chance to set up the
+	 * environment.  We return ENODEV here to tell the kernel stack
+	 * to quietly ignore us for now, and the FW application will
+	 * re-probe us later.
+	 */
+	if (!pfdev->num_resources) {
+		dev_warn(ionic->dev, "device resources not yet available\n");
+		return -ENODEV;
+	}
 
 	ionic->num_bars = 0;
 	for (i = 0, j = 0; i < IONIC_BARS_MAX; i++) {
@@ -252,7 +252,7 @@ static int ionic_map_bars(struct ionic *ionic)
 			base = devm_ioremap_resource(dev, res);
 		if (IS_ERR(base)) {
 			dev_err(dev, "Cannot memory-map BAR %d, aborting\n", j);
-			return -ENODEV;
+			return PTR_ERR(base);
 		}
 		bars[j].len = res->end - res->start + 1;
 		bars[j].vaddr = base;
@@ -300,7 +300,7 @@ phys_addr_t ionic_bus_phys_dbpage(struct ionic *ionic, int page_num)
 	return ionic->idev.phy_db_pages;
 }
 
-int ionic_probe(struct platform_device *pfdev)
+static int ionic_probe(struct platform_device *pfdev)
 {
 	struct device *dev = &pfdev->dev;
 	struct device_node *np;
@@ -312,8 +312,8 @@ int ionic_probe(struct platform_device *pfdev)
 		return -ENOMEM;
 
 	ionic->pfdev = pfdev;
-	platform_set_drvdata(pfdev, ionic);
 	ionic->dev = dev;
+	platform_set_drvdata(pfdev, ionic);
 	mutex_init(&ionic->dev_cmd_lock);
 
 	np = dev->of_node;
@@ -323,14 +323,14 @@ int ionic_probe(struct platform_device *pfdev)
 	}
 
 	err = of_reserved_mem_device_init_by_idx(dev, np, 0);
-	if (err != 0 && err != -ENODEV) {
-		dev_err(dev, "Failed to init reserved memory region\n");
+	if (err && err != -ENODEV) {
+		dev_err(dev, "Failed to init reserved memory region: %d\n", err);
 		return err;
 	}
 
 	err = ionic_set_dma_mask(ionic);
 	if (err) {
-		dev_err(dev, "Cannot set DMA mask, aborting\n");
+		dev_err(dev, "Cannot set DMA mask: %d, aborting\n", err);
 		return err;
 	}
 
@@ -344,20 +344,20 @@ int ionic_probe(struct platform_device *pfdev)
 	/* Discover ionic dev resources */
 	err = ionic_mnic_dev_setup(ionic);
 	if (err) {
-		dev_err(dev, "Cannot setup device, aborting\n");
+		dev_err(dev, "Cannot setup device: %d, aborting\n", err);
 		goto err_out_unmap_bars;
 	}
 
 	err = ionic_identify(ionic);
 	if (err) {
-		dev_err(dev, "Cannot identify device, aborting\n");
+		dev_err(dev, "Cannot identify device: %d, aborting\n", err);
 		goto err_out_unmap_bars;
 	}
 	ionic_debugfs_add_ident(ionic);
 
 	err = ionic_init(ionic);
 	if (err) {
-		dev_err(dev, "Cannot init device, aborting\n");
+		dev_err(dev, "Cannot init device: %d, aborting\n", err);
 		goto err_out_unmap_bars;
 	}
 
@@ -405,6 +405,7 @@ int ionic_probe(struct platform_device *pfdev)
 
 	mod_timer(&ionic->watchdog_timer,
 		  round_jiffies(jiffies + ionic->watchdog_period));
+	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
 
 	return 0;
 
@@ -416,6 +417,9 @@ err_out_free_lifs:
 err_out_free_irqs:
 	ionic_bus_free_irq_vectors(ionic);
 err_out_unmap_bars:
+	del_timer_sync(&ionic->watchdog_timer);
+	if (ionic->wq)
+		destroy_workqueue(ionic->wq);
 	ionic_unmap_bars(ionic);
 	ionic_debugfs_del_dev(ionic);
 	mutex_destroy(&ionic->dev_cmd_lock);
@@ -423,32 +427,37 @@ err_out_unmap_bars:
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(ionic_probe);
 
-int ionic_remove(struct platform_device *pfdev)
+static int ionic_remove(struct platform_device *pfdev)
 {
 	struct ionic *ionic = platform_get_drvdata(pfdev);
 
-	if (ionic) {
-		del_timer_sync(&ionic->watchdog_timer);
+	if (ionic->lif)
+		set_bit(IONIC_LIF_F_IN_SHUTDOWN, ionic->lif->state);
+
+	del_timer_sync(&ionic->watchdog_timer);
+	destroy_workqueue(ionic->wq);
+
+	if (ionic->lif) {
+		/* prevent adminq cmds if already known as down */
+		if (test_and_clear_bit(IONIC_LIF_F_FW_RESET, ionic->lif->state))
+			set_bit(IONIC_LIF_F_FW_STOPPING, ionic->lif->state);
+
 		ionic_lif_unregister(ionic->lif);
 		ionic_lif_deinit(ionic->lif);
 		ionic_lif_free(ionic->lif);
 		ionic->lif = NULL;
-		ionic_port_reset(ionic);
-		ionic_reset(ionic);
 		ionic_bus_free_irq_vectors(ionic);
-		ionic_unmap_bars(ionic);
-		ionic_debugfs_del_dev(ionic);
-
-		mutex_destroy(&ionic->dev_cmd_lock);
-
-		dev_info(ionic->dev, "removed\n");
 	}
+
+	ionic_port_reset(ionic);
+	ionic_reset(ionic);
+	ionic_unmap_bars(ionic);
+	ionic_debugfs_del_dev(ionic);
+	mutex_destroy(&ionic->dev_cmd_lock);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(ionic_remove);
 
 void ionic_reset_prepare(struct pci_dev *pdev)
 {
@@ -471,7 +480,6 @@ static struct platform_driver ionic_driver = {
 	.driver = {
 		.name = "ionic-mnic",
 		.owner = THIS_MODULE,
-		.of_match_table = mnic_of_match,
 	},
 };
 

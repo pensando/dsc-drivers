@@ -76,15 +76,6 @@ void ionic_bus_free_irq_vectors(struct ionic *ionic)
 #endif
 }
 
-struct net_device *ionic_alloc_netdev(struct ionic *ionic)
-{
-	dev_dbg(ionic->dev, "nxqs=%d nintrs=%d\n",
-		ionic->ntxqs_per_lif, ionic->nintrs);
-
-	return alloc_etherdev_mqs(sizeof(struct ionic_lif),
-				  ionic->ntxqs_per_lif, ionic->ntxqs_per_lif);
-}
-
 static int ionic_map_bars(struct ionic *ionic)
 {
 	struct pci_dev *pdev = ionic->pdev;
@@ -440,6 +431,7 @@ static int ionic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	mod_timer(&ionic->watchdog_timer,
 		  round_jiffies(jiffies + ionic->watchdog_period));
+	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
 
 	return 0;
 

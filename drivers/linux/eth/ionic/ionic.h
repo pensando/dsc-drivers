@@ -59,8 +59,9 @@ struct ionic {
 	struct dentry *dentry;
 	struct ionic_dev_bar bars[IONIC_BARS_MAX];
 	unsigned int num_bars;
-	struct ionic_identity ident;
 	bool is_mgmt_nic;
+	struct ionic_identity ident;
+	struct workqueue_struct *wq;
 	struct ionic_lif *lif;
 	unsigned int nnqs_per_lif;
 	unsigned int nrdma_eqs_per_lif;
@@ -72,6 +73,7 @@ struct ionic {
 #ifndef HAVE_PCI_IRQ_API
 	struct msix_entry *msix;
 #endif
+	struct delayed_work doorbell_check_dwork;
 	struct work_struct nb_work;
 	struct notifier_block nb;
 #ifdef IONIC_DEVLINK
@@ -82,6 +84,8 @@ struct ionic {
 	int num_vfs;
 	struct timer_list watchdog_timer;
 	int watchdog_period;
+
+	const char *mnet_netdev_name;
 };
 
 int ionic_adminq_post(struct ionic_lif *lif, struct ionic_admin_ctx *ctx);

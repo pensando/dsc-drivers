@@ -120,15 +120,14 @@ struct ionic_qcq {
 	u32 cmb_order;
 	bool armed;
 	struct dim dim;
-	struct timer_list napi_deadline;
 	struct ionic_queue q;
 	struct ionic_cq cq;
 	struct napi_struct napi;
-	struct ionic_qcq *napi_qcq;
 	struct ionic_intr_info intr;
 #ifdef IONIC_DEBUG_STATS
 	struct ionic_napi_stats napi_stats;
 #endif
+	struct work_struct doorbell_napi_work;
 	struct dentry *dentry;
 };
 
@@ -408,7 +407,7 @@ static inline bool ionic_txq_hwstamp_enabled(struct ionic_queue *q)
 	return q->features & IONIC_TXQ_F_HWSTAMP;
 }
 
-void ionic_lif_deferred_enqueue(struct ionic_deferred *def,
+void ionic_lif_deferred_enqueue(struct ionic_lif *lif,
 				struct ionic_deferred_work *work);
 void ionic_link_status_check_request(struct ionic_lif *lif, bool can_sleep);
 #ifdef HAVE_VOID_NDO_GET_STATS64
