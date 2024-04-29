@@ -3595,6 +3595,7 @@ int ionic_restart_lif(struct ionic_lif *lif)
 	clear_bit(IONIC_LIF_F_FW_RESET, lif->state);
 	ionic_link_status_check_request(lif, CAN_SLEEP);
 	netif_device_attach(lif->netdev);
+	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
 
 	return 0;
 
@@ -3701,8 +3702,8 @@ void ionic_lif_deinit(struct ionic_lif *lif)
 	if (!test_and_clear_bit(IONIC_LIF_F_INITED, lif->state))
 		return;
 
+	cancel_delayed_work_sync(&lif->ionic->doorbell_check_dwork);
 	if (!test_bit(IONIC_LIF_F_FW_RESET, lif->state)) {
-		cancel_work_sync(&lif->ionic->doorbell_check_dwork.work);
 		cancel_work_sync(&lif->deferred.work);
 		cancel_work_sync(&lif->tx_timeout_work);
 		ionic_rx_filters_deinit(lif);
