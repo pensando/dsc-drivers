@@ -72,11 +72,9 @@ static void ionic_doorbell_check_dwork(struct work_struct *work)
 					   doorbell_check_dwork.work);
 	struct ionic_lif *lif = ionic->lif;
 
-	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state))
+	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state) ||
+	    test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return;
-
-	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
-		goto out;
 
 	mutex_lock(&lif->queue_lock);
 	napi_schedule(&lif->adminqcq->napi);
@@ -109,7 +107,6 @@ static void ionic_doorbell_check_dwork(struct work_struct *work)
 	}
 	mutex_unlock(&lif->queue_lock);
 
-out:
 	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
 }
 
