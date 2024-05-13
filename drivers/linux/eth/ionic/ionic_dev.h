@@ -316,7 +316,8 @@ struct ionic_intr_info {
 	unsigned int cpu;
 	u32 dim_coal_hw;
 	u16 dim_coal_usecs;
-	cpumask_t affinity_mask;
+	cpumask_var_t *affinity_mask;
+	struct irq_affinity_notify aff_notify;
 };
 
 struct ionic_cq {
@@ -327,7 +328,6 @@ struct ionic_cq {
 	bool done_color;
 	unsigned int num_descs;
 	unsigned int desc_size;
-	unsigned int last_cpu;
 #ifdef IONIC_DEBUG_STATS
 	u64 compl_count;
 #endif

@@ -15,6 +15,7 @@
 #include <linux/ioctl.h>
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/platform_device.h>
 #include <linux/uio_driver.h>
 #include <linux/spinlock.h>
@@ -32,26 +33,19 @@
 #define TSTAMP_SIZE             0x8
 #define MDEV_NODE_NAME_LEN      0x8
 
-typedef enum mdev_type {
+#define UIO_DRIVER_NAME		"pensando-mdev"
+#define MNET_DRIVER_NAME	"ionic-mnic"
+
+enum mdev_type {
 	MDEV_TYPE_MNET,
 	MDEV_TYPE_MCRYPT,
-} mdev_type_t;
-
-struct mdev_dev;
-
-typedef int (*platform_rsrc_func_t)(struct mdev_dev *,
-				    struct mdev_create_req *);
-typedef int (*attach_func_t)(struct platform_device *);
-typedef int (*detach_func_t)(struct platform_device *);
+};
 
 struct mdev_dev {
 	struct device_node *of_node;
 	struct platform_device *pdev;
 	struct list_head node;
-	mdev_type_t type;
-	platform_rsrc_func_t platform_rsrc;
-	attach_func_t attach;
-	detach_func_t detach;
+	enum mdev_type type;
 };
 
 LIST_HEAD(mdev_list);
@@ -62,36 +56,33 @@ struct device *mdev_device;
 struct device *mnet_device;
 static unsigned int mdev_major;
 static struct cdev mdev_cdev;
+struct mutex mdev_list_lock;	/* protect our list handling */
 
-/* Yuck */
-extern int ionic_probe(struct platform_device *pfdev);
-extern int ionic_remove(struct platform_device *pfdev);
-
-struct uio_pdrv_genirq_platdata {
+struct mdev_uio_platdata {
 	struct uio_info *uioinfo;
 	spinlock_t lock;
 	unsigned long flags;
 	struct platform_device *pdev;
 };
 
-/* Bits in uio_pdrv_genirq_platdata.flags */
+/* Bits in mdev_uio_platdata.flags */
 enum {
 	UIO_IRQ_DISABLED = 0,
 };
 
-static int uio_pdrv_genirq_open(struct uio_info *info, struct inode *inode)
+static int mdev_uio_open(struct uio_info *info, struct inode *inode)
 {
 	return 0;
 }
 
-static int uio_pdrv_genirq_release(struct uio_info *info, struct inode *inode)
+static int mdev_uio_release(struct uio_info *info, struct inode *inode)
 {
 	return 0;
 }
 
-static irqreturn_t uio_pdrv_genirq_handler(int irq, struct uio_info *dev_info)
+static irqreturn_t mdev_uio_handler(int irq, struct uio_info *dev_info)
 {
-	struct uio_pdrv_genirq_platdata *priv = dev_info->priv;
+	struct mdev_uio_platdata *priv = dev_info->priv;
 
 	/* Just disable the interrupt in the interrupt controller, and
 	 * remember the state so we can allow user space to enable it later.
@@ -105,9 +96,9 @@ static irqreturn_t uio_pdrv_genirq_handler(int irq, struct uio_info *dev_info)
 	return IRQ_HANDLED;
 }
 
-static int uio_pdrv_genirq_irqcontrol(struct uio_info *dev_info, s32 irq_on)
+static int mdev_uio_irqcontrol(struct uio_info *dev_info, s32 irq_on)
 {
-	struct uio_pdrv_genirq_platdata *priv = dev_info->priv;
+	struct mdev_uio_platdata *priv = dev_info->priv;
 	unsigned long flags;
 
 	/* Allow user space to enable and disable the interrupt
@@ -131,13 +122,24 @@ static int uio_pdrv_genirq_irqcontrol(struct uio_info *dev_info, s32 irq_on)
 	return 0;
 }
 
-static int mdev_uio_pdrv_genirq_probe(struct platform_device *pdev)
+static int mdev_uio_probe(struct platform_device *pdev)
 {
 	struct uio_info *uioinfo = dev_get_platdata(&pdev->dev);
-	struct uio_pdrv_genirq_platdata *priv;
+	struct mdev_uio_platdata *priv;
 	struct uio_mem *uiomem;
 	int ret = -EINVAL;
 	int i;
+
+	/* If there are no resources then the probe is happening early,
+	 * before the rest of the firmware has had a chance to set up the
+	 * environment.  We return ENODEV here to tell the kernel stack
+	 * to quietly ignore us for now, and the FW application will
+	 * re-probe us later.
+	 */
+	if (!pdev->num_resources) {
+		dev_warn(&pdev->dev, "device resources not yet available\n");
+		return -ENODEV;
+	}
 
 	if (pdev->dev.of_node) {
 		/* alloc uioinfo for one device */
@@ -227,10 +229,10 @@ static int mdev_uio_pdrv_genirq_probe(struct platform_device *pdev)
 	 * Interrupt sharing is not supported.
 	 */
 
-	uioinfo->handler = uio_pdrv_genirq_handler;
-	uioinfo->irqcontrol = uio_pdrv_genirq_irqcontrol;
-	uioinfo->open = uio_pdrv_genirq_open;
-	uioinfo->release = uio_pdrv_genirq_release;
+	uioinfo->handler = mdev_uio_handler;
+	uioinfo->irqcontrol = mdev_uio_irqcontrol;
+	uioinfo->open = mdev_uio_open;
+	uioinfo->release = mdev_uio_release;
 	uioinfo->priv = priv;
 
 	ret = uio_register_device(&pdev->dev, priv->uioinfo);
@@ -243,9 +245,9 @@ static int mdev_uio_pdrv_genirq_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int mdev_uio_pdrv_genirq_remove(struct platform_device *pdev)
+static int mdev_uio_remove(struct platform_device *pdev)
 {
-	struct uio_pdrv_genirq_platdata *priv = platform_get_drvdata(pdev);
+	struct mdev_uio_platdata *priv = platform_get_drvdata(pdev);
 
 	uio_unregister_device(priv->uioinfo);
 
@@ -265,7 +267,7 @@ static int mdev_close(struct inode *i, struct file *f)
 	return 0;
 }
 
-static int mdev_get_mnet_platform_rsrc(struct mdev_dev *mdev,
+static int mdev_get_mnet_platform_rsrc(struct platform_device *pdev,
 				       struct mdev_create_req *req)
 {
 	struct resource mnet_resource[] = {
@@ -293,11 +295,11 @@ static int mdev_get_mnet_platform_rsrc(struct mdev_dev *mdev,
 	};
 
 	/* add resource info */
-	return platform_device_add_resources(mdev->pdev, mnet_resource,
+	return platform_device_add_resources(pdev, mnet_resource,
 					     ARRAY_SIZE(mnet_resource));
 }
 
-static int mdev_get_mcrypt_platform_rsrc(struct mdev_dev *mdev,
+static int mdev_get_mcrypt_platform_rsrc(struct platform_device *pdev,
 					 struct mdev_create_req *req)
 {
 	struct resource mcrypt_resource[] = {
@@ -321,85 +323,110 @@ static int mdev_get_mcrypt_platform_rsrc(struct mdev_dev *mdev,
 	};
 
 	/* add resource info */
-	return platform_device_add_resources(mdev->pdev, mcrypt_resource,
+	return platform_device_add_resources(pdev, mcrypt_resource,
 					     ARRAY_SIZE(mcrypt_resource));
 }
 
 static int mdev_attach_one(struct mdev_dev *mdev,
-			   struct mdev_create_req *req)
+			   struct mdev_create_req *req,
+			   unsigned int cmd)
 {
-	char *mdev_name = NULL;
+	char mdev_name[MDEV_NAME_LEN + 1] = {0};
+	struct platform_device *pdev;
 	int err = 0;
 
-	mdev->pdev = of_find_device_by_node(mdev->of_node);
-	if (!mdev->pdev) {
-		dev_err(mdev_device, "Can't find device for of_node %s\n",
-			mdev->of_node->name);
-		err = -ENXIO;
-		goto err;
-	}
+	if (req->is_uio_dev)
+		(void)strscpy(mdev_name, req->name, sizeof(mdev_name) - 1);
+	else
+		snprintf(mdev_name, sizeof(mdev_name) - 1,
+			 "mdev:%s", mdev->of_node->name);
 
-	err = (*mdev->platform_rsrc)(mdev, req);
-	if (err) {
-		dev_err(mdev_device, "Can't get platform resources\n");
-		err = -ENOSPC;
-		goto err_unset_pdev;
-	}
-
-	mdev_name = devm_kzalloc(mdev_device, MDEV_NAME_LEN + 1, GFP_KERNEL);
-	if (!mdev_name) {
-		dev_err(mdev_device, "Can't allocate memory for name\n");
+	pdev = platform_device_alloc(mdev_name, PLATFORM_DEVID_NONE);
+	if (!pdev) {
+		dev_err(mdev_device, "Can't alloc platform device for %s\n",
+			req->name);
 		err = -ENOMEM;
-		goto err_unset_pdev;
+		goto err_out;
 	}
 
-	strncpy(mdev_name, req->name, MDEV_NAME_LEN);
-	mdev->pdev->name = mdev_name;
+	pdev->dev.parent = &platform_bus;
+	pdev->dev.fwnode = &mdev->of_node->fwnode;
+	pdev->dev.of_node = of_node_get(to_of_node(pdev->dev.fwnode));
+	pdev->dev.of_node_reused = true;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
+	pdev->dev.dma_mask = &pdev->platform_dma_mask;
+#endif
+	of_msi_configure(&pdev->dev, pdev->dev.of_node);
 
-	/* call probe with this platform_device */
-	err = (*mdev->attach)(mdev->pdev);
+	switch (cmd) {
+	case MDEV_CREATE_MNET:
+		if (req->is_uio_dev)
+			pdev->driver_override = kasprintf(GFP_KERNEL, "%s", UIO_DRIVER_NAME);
+		else
+			pdev->driver_override = kasprintf(GFP_KERNEL, "%s", MNET_DRIVER_NAME);
+		err = mdev_get_mnet_platform_rsrc(pdev, req);
+
+		/* ionic-mnic needs the req->name for the netdev name */
+		platform_device_add_data(pdev, req->name, MDEV_NAME_LEN + 1);
+		break;
+
+	case MDEV_CREATE_MCRYPT:
+		if (req->is_uio_dev) {
+			pdev->driver_override = kasprintf(GFP_KERNEL, "%s", UIO_DRIVER_NAME);
+			err = mdev_get_mcrypt_platform_rsrc(pdev, req);
+		} else {
+			err = -ENODEV;
+			dev_err(mdev_device, "%s should have UIO bit set: %d\n",
+				req->name, err);
+		}
+		break;
+
+	default:
+		err = -ENODEV;
+		break;
+	}
+
 	if (err) {
-		dev_err(mdev_device, "probe for %s failed: %d\n",
-			mdev->pdev->name, err);
-		goto err_free_name;
+		dev_err(mdev_device, "Can't get platform resources for %s: %d\n",
+			req->name, err);
+		goto err_free_pdev;
 	}
 
-	dev_info(mdev_device, "%s created successfully\n", mdev->pdev->name);
+	/* This will trigger the driver probe() */
+	err = platform_device_add(pdev);
+	if (err) {
+		dev_err(mdev_device, "Can't add platform device for %s: %d\n",
+			req->name, err);
+		goto err_free_pdev;
+	}
+
+	mdev->pdev = pdev;
+	dev_info(mdev_device, "%s created successfully on %s\n",
+		 req->name, mdev->of_node->name);
+
 	return 0;
 
-err_free_name:
-	//devm_kfree(mdev_device, mdev->pdev->name);
-	//mdev->pdev->name = NULL;
-err_unset_pdev:
-	mdev->pdev = NULL;
-err:
+err_free_pdev:
+	platform_device_put(pdev);
+err_out:
 	return err;
 }
 
-static int mdev_detach_one(struct mdev_dev *mdev)
+static void mdev_detach_one(struct mdev_dev *mdev)
 {
-	int err;
-
-	if (!mdev->pdev)
-		return 0;
+	const char *name = mdev->pdev->name;
 
 	dev_info(mdev_device, "Removing interface %s\n", mdev->pdev->name);
-	err = (*mdev->detach)(mdev->pdev);
-	if (err) {
-		dev_err(mdev_device, "Failed to remove %s\n",
-			mdev->pdev->name);
-		return err;
-	}
 
-	dev_info(mdev_device, "Successfully removed %s\n", mdev->pdev->name);
-
-	//devm_kfree(mdev_device, mdev->pdev->name);
+	/* This will trigger the driver remove() */
+	platform_device_unregister(mdev->pdev);
+	kfree(mdev->pdev);
 	mdev->pdev = NULL;
 
-	return 0;
+	dev_info(mdev_device, "Successfully removed %s\n", name);
 }
 
-static inline bool mdev_ioctl_matches(struct mdev_dev *mdev, uint32_t cmd)
+static inline bool mdev_ioctl_matches(struct mdev_dev *mdev, unsigned int cmd)
 {
 	if (cmd == MDEV_CREATE_MNET && mdev->type == MDEV_TYPE_MNET)
 		return true;
@@ -414,9 +441,9 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
 	char name[MDEV_NAME_LEN+1] = {0};
-	struct mdev_create_req req;
+	struct mdev_create_req req = {0};
 	struct mdev_dev *mdev;
-	int ret = -EDQUOT;
+	int ret = -ENODEV;
 
 	switch (cmd) {
 	case MDEV_CREATE_MNET:
@@ -429,13 +456,17 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		dev_info(mdev_device, "Creating %s %s\n",
 			 req.name, req.is_uio_dev ? "(UIO)" : "");
 
+		mutex_lock(&mdev_list_lock);
+
 		/* scan the list to see if it already exists,
 		 * and if so, quietly ignore this request
 		 */
 		list_for_each_entry(mdev, &mdev_list, node) {
 			if (mdev->pdev &&
-			    !strncmp(mdev->pdev->name, req.name, MDEV_NAME_LEN))
+			    !strncmp(mdev->pdev->name, req.name, MDEV_NAME_LEN)) {
+				mutex_unlock(&mdev_list_lock);
 				return 0;
+			}
 		}
 
 		/* find the first useful empty slot */
@@ -443,20 +474,12 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			if (mdev->pdev || !mdev_ioctl_matches(mdev, cmd))
 				continue;
 
-			if (req.is_uio_dev) {
-				mdev->attach = mdev_uio_pdrv_genirq_probe;
-				mdev->detach = mdev_uio_pdrv_genirq_remove;
-			} else if (mdev->type == MDEV_TYPE_MNET) {
-				mdev->attach = ionic_probe;
-				mdev->detach = ionic_remove;
-			} else {
-				ret = -EINVAL;
-				break;
-			}
-
-			ret = mdev_attach_one(mdev, &req);
+			ret = mdev_attach_one(mdev, &req, cmd);
 			break;
 		}
+		mutex_unlock(&mdev_list_lock);
+		if (ret == -ENODEV)
+			dev_info(mdev_device, "No device found for %s\n", req.name);
 		break;
 
 	case MDEV_DESTROY:
@@ -466,14 +489,20 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			break;
 		}
 		dev_info(mdev_device, "Removing %s\n", name);
+
+		mutex_lock(&mdev_list_lock);
 		list_for_each_entry(mdev, &mdev_list, node) {
 			if (!mdev->pdev ||
 			    strncmp(mdev->pdev->name, name, MDEV_NAME_LEN))
 				continue;
 
-			ret = mdev_detach_one(mdev);
+			ret = 0;
+			mdev_detach_one(mdev);
 			break;
 		}
+		mutex_unlock(&mdev_list_lock);
+		if (ret == -ENODEV)
+			dev_info(mdev_device, "Device %s not found\n", name);
 		break;
 
 	default:
@@ -485,37 +514,13 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-static int mdev_probe(struct platform_device *pfdev)
-{
-	return 0;
-}
 
-static int mdev_remove(struct platform_device *pfdev)
-{
-	struct mdev_dev *mdev, *tmp;
-
-	list_for_each_entry_safe(mdev, tmp, &mdev_list, node) {
-		(void)mdev_detach_one(mdev);
-		list_del(&mdev->node);
-		devm_kfree(mdev_device, mdev);
-	}
-
-	return 0;
-}
-
-static const struct of_device_id mdev_of_match[] = {
-	{.compatible = "pensando,mnet"},
-	{.compatible = "pensando,mcrypt"},
-	{/* end of table */}
-};
-
-static struct platform_driver mdev_driver = {
-	.probe = mdev_probe,
-	.remove = mdev_remove,
+static struct platform_driver mdev_uio_driver = {
+	.probe = mdev_uio_probe,
+	.remove = mdev_uio_remove,
 	.driver = {
-		.name = "pensando-mdev",
+		.name = UIO_DRIVER_NAME,
 		.owner = THIS_MODULE,
-		.of_match_table = mdev_of_match,
 	},
 };
 
@@ -526,42 +531,55 @@ static const struct file_operations mdev_fops = {
 	.unlocked_ioctl = mdev_ioctl,
 };
 
-static int mdev_init_dev_list(uint32_t max_dev, const char *pfx,
-			      platform_rsrc_func_t platform_rsrc)
+static void mdev_get_devicetree_nodes(int max_dev, int type)
 {
 	char of_node_name[MDEV_NODE_NAME_LEN + 1] = {0};
+	struct device_node *np;
 	struct mdev_dev *mdev;
-	uint32_t i;
+	int i;
 
+	mutex_lock(&mdev_list_lock);
 	for (i = 0; i < max_dev; i++) {
-		mdev = devm_kzalloc(mdev_device, sizeof(*mdev), GFP_KERNEL);
-		if (!mdev)
-			return -ENOMEM;
-
 		snprintf(of_node_name, sizeof(of_node_name), "%s%u",
-			 pfx, i);
-		mdev->of_node = of_find_node_by_name(NULL, of_node_name);
+			 type == MDEV_TYPE_MNET ? "mnet" : "mcrypt", i);
 
 		/* skip any node not found in device tree */
-		if (mdev->of_node == NULL) {
-			devm_kfree(mdev_device, mdev);
+		np = of_find_node_by_name(NULL, of_node_name);
+		if (!np)
 			continue;
+
+		mdev = devm_kzalloc(mdev_device, sizeof(*mdev), GFP_KERNEL);
+		if (!mdev) {
+			of_node_put(np);
+			break;
 		}
 
+		mdev->of_node = np;
+		mdev->type = type;
+
 		dev_info(mdev_device, "Found node %s\n", mdev->of_node->name);
-		mdev->platform_rsrc = platform_rsrc;
 		list_add_tail(&mdev->node, &mdev_list);
-
-		// TODO: Should this put() happen when driver unloads?
-		of_node_put(mdev->of_node);
 	}
+	mutex_unlock(&mdev_list_lock);
+}
 
-	return 0;
+static void mdev_put_devicetree_nodes(void)
+{
+	struct mdev_dev *mdev, *tmp;
+
+	mutex_lock(&mdev_list_lock);
+	list_for_each_entry_safe(mdev, tmp, &mdev_list, node) {
+		list_del(&mdev->node);
+		if (mdev->pdev)
+			mdev_detach_one(mdev);
+		of_node_put(mdev->of_node);
+		devm_kfree(mdev_device, mdev);
+	}
+	mutex_unlock(&mdev_list_lock);
 }
 
 static int __init mdev_init(void)
 {
-	struct mdev_dev *mdev, *tmp;
 	int ret;
 
 	mdev_class = class_create(THIS_MODULE, DRV_NAME);
@@ -612,28 +630,20 @@ static int __init mdev_init(void)
 		goto error_destroy_mnet;
 	}
 
-	ret = mdev_init_dev_list(MAX_MNET_DEVICES, "mnet",
-				 mdev_get_mnet_platform_rsrc);
-	if (ret)
-		goto error_destroy_cdev;
+	mutex_init(&mdev_list_lock);
 
-	ret = mdev_init_dev_list(MAX_MCRYPT_DEVICES, "mcrypt",
-				 mdev_get_mcrypt_platform_rsrc);
-	if (ret)
-		goto error_destroy_list;
+	mdev_get_devicetree_nodes(MAX_MNET_DEVICES, MDEV_TYPE_MNET);
+	mdev_get_devicetree_nodes(MAX_MCRYPT_DEVICES, MDEV_TYPE_MCRYPT);
 
-	ret = platform_driver_register(&mdev_driver);
+	ret = platform_driver_register(&mdev_uio_driver);
 	if (ret)
 		goto error_destroy_list;
 
 	return 0;
 
 error_destroy_list:
-	list_for_each_entry_safe(mdev, tmp, &mdev_list, node) {
-		list_del(&mdev->node);
-		devm_kfree(mdev_device, mdev);
-	}
-error_destroy_cdev:
+	mdev_put_devicetree_nodes();
+	mutex_destroy(&mdev_list_lock);
 	cdev_del(&mdev_cdev);
 error_destroy_mnet:
 #ifndef MDEV_HACK
@@ -651,7 +661,11 @@ error_out:
 
 static void __exit mdev_cleanup(void)
 {
-	platform_driver_unregister(&mdev_driver);
+	platform_driver_unregister(&mdev_uio_driver);
+
+	mdev_put_devicetree_nodes();
+	mutex_destroy(&mdev_list_lock);
+
 	cdev_del(&mdev_cdev);
 #ifndef MDEV_HACK
 	device_destroy(mdev_class, MKDEV(mdev_major, 1));

@@ -3,7 +3,7 @@
  * Copyright (c) 2019, Mellanox Technologies inc.  All rights reserved.
  */
 
-#ifndef CONFIG_DIMLIB
+#if !IS_ENABLED(CONFIG_DIMLIB)
 #include "dim.h"
 
 bool dim_on_top(struct dim *dim)

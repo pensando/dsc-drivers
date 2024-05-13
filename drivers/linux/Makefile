@@ -69,11 +69,13 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "24.04.2-003"
+    DVER = "24.05.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
 KOPT += KCFLAGS="$(KCFLAGS)" KBUILD_EXTRA_SYMBOLS="$(KSYMS)"
+
+$(info linux_ver: BUILD_KERNEL ${BUILD_KERNEL} KVER ${KVER} LINUX_VERSION ${LINUX_VERSION} KSRC ${KSRC} )
 
 all: $(ALL)
 
