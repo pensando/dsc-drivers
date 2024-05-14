@@ -22,6 +22,8 @@ struct ionic_lif;
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_VF	0x1003
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_MGMT	0x1004
 
+#define IONIC_ASIC_TYPE_ELBA	2
+
 #define DEVCMD_TOUT_DEF 5
 #define DEVCMD_TIMEOUT  devcmd_timeout
 #define SHORT_TIMEOUT   1
@@ -32,7 +34,7 @@ struct ionic_lif;
 #define SCALED_PPM		(1000000ull << 16)  /* 2^16 million parts per 2^16 million */
 
 extern bool port_init_up;
-extern unsigned int rx_copybreak;
+extern unsigned short rx_copybreak;
 extern unsigned int rx_fill_threshold;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
@@ -73,6 +75,7 @@ struct ionic {
 #ifndef HAVE_PCI_IRQ_API
 	struct msix_entry *msix;
 #endif
+	cpumask_var_t *affinity_masks;
 	struct delayed_work doorbell_check_dwork;
 	struct work_struct nb_work;
 	struct notifier_block nb;
@@ -85,7 +88,7 @@ struct ionic {
 	struct timer_list watchdog_timer;
 	int watchdog_period;
 
-	const char *mnet_netdev_name;
+	char mnet_netdev_name[IFNAMSIZ];
 };
 
 int ionic_adminq_post(struct ionic_lif *lif, struct ionic_admin_ctx *ctx);
@@ -112,5 +115,7 @@ int ionic_reset(struct ionic *ionic);
 int ionic_port_identify(struct ionic *ionic);
 int ionic_port_init(struct ionic *ionic);
 int ionic_port_reset(struct ionic *ionic);
+
+bool ionic_doorbell_wa(struct ionic *ionic);
 
 #endif /* _IONIC_H_ */

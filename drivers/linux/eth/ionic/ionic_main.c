@@ -23,8 +23,8 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION(IONIC_DRV_VERSION);
 MODULE_INFO(supported, "external");
 
-unsigned int rx_copybreak = IONIC_RX_COPYBREAK_DEFAULT;
-module_param(rx_copybreak, uint, 0600);
+unsigned short rx_copybreak = IONIC_RX_COPYBREAK_DEFAULT;
+module_param(rx_copybreak, ushort, 0600);
 MODULE_PARM_DESC(rx_copybreak, "Maximum size of packet that is copied to a bounce buffer on RX");
 
 unsigned int rx_fill_threshold = IONIC_RX_FILL_THRESHOLD;

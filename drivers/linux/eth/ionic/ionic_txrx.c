@@ -1109,11 +1109,12 @@ int ionic_tx_napi(struct napi_struct *napi, int budget)
 				   work_done, flags);
 	}
 
-	if (!work_done)
-		ionic_txq_poke_doorbell(&qcq->q);
+	if (cq->bound_q->lif->doorbell_wa) {
+		if (!work_done)
+			ionic_rxq_poke_doorbell(&qcq->q);
+	}
 
 	DEBUG_STATS_NAPI_POLL(qcq, work_done);
-	cq->last_cpu = smp_processor_id();
 
 	return work_done;
 }
@@ -1157,11 +1158,12 @@ int ionic_rx_napi(struct napi_struct *napi, int budget)
 				   work_done, flags);
 	}
 
-	if (!work_done)
-		ionic_rxq_poke_doorbell(&qcq->q);
+	if (cq->bound_q->lif->doorbell_wa) {
+		if (!work_done)
+			ionic_rxq_poke_doorbell(&qcq->q);
+	}
 
 	DEBUG_STATS_NAPI_POLL(qcq, work_done);
-	cq->last_cpu = smp_processor_id();
 
 	return work_done;
 }
@@ -1207,12 +1209,13 @@ int ionic_txrx_napi(struct napi_struct *napi, int budget)
 
 	DEBUG_STATS_NAPI_POLL(rxqcq, rx_work_done);
 	DEBUG_STATS_NAPI_POLL(txqcq, tx_work_done);
-	rxcq->last_cpu = smp_processor_id();
 
-	if (!rx_work_done)
-		ionic_rxq_poke_doorbell(&rxqcq->q);
-	if (!tx_work_done)
-		ionic_txq_poke_doorbell(&txqcq->q);
+	if (lif->doorbell_wa) {
+		if (!rx_work_done)
+			ionic_rxq_poke_doorbell(&rxqcq->q);
+		if (!tx_work_done)
+			ionic_txq_poke_doorbell(&txqcq->q);
+	}
 
 	return rx_work_done;
 }

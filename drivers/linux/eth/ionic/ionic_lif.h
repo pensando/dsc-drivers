@@ -7,7 +7,7 @@
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
 
-#ifdef CONFIG_DIMLIB
+#if IS_ENABLED(CONFIG_DIMLIB)
 #include <linux/dim.h>
 #else
 #include "dim.h"
@@ -237,7 +237,8 @@ struct ionic_lif {
 	DECLARE_BITMAP(state, IONIC_LIF_F_STATE_SIZE);
 	struct ionic *ionic;
 	u64 __iomem *kern_dbpage;
-	u32 rx_copybreak;
+	u16 rx_copybreak;
+	u8 doorbell_wa:1;
 	unsigned int nxqs;
 
 	struct ionic_qcq **txqcqs;

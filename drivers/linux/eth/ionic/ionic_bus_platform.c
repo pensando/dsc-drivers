@@ -34,7 +34,7 @@ struct ionic_intr_msixcfg {
 
 static void __iomem *ionic_intr_msixcfg_addr(struct device *mnic_dev, const int intr)
 {
-	struct ionic_dev *idev = (struct ionic_dev *)mnic_dev->platform_data;
+	struct ionic_dev *idev = *(struct ionic_dev **)mnic_dev->platform_data;
 
 	dev_info(mnic_dev, "msix_cfg_base: %p\n", idev->msix_cfg_base);
 	return (idev->msix_cfg_base + (intr * IONIC_INTR_MSIXCFG_STRIDE));
@@ -195,18 +195,20 @@ static int ionic_mnic_dev_setup(struct ionic *ionic)
 	/* retrieve the application-assigned netdev name
 	 * before we use platform_data for something else
 	 */
-	ionic->mnet_netdev_name = (const char *)ionic->dev->platform_data;
-
-	/* save the idev into dev->platform_data so we can
-	 * use it later when setting up msixcfg
-	 */
-	ionic->dev->platform_data = idev;
+	strscpy(ionic->mnet_netdev_name,
+		ionic->dev->platform_data,
+		sizeof(ionic->mnet_netdev_name));
 
 	sig = ioread32(&idev->dev_info_regs->signature);
 	if (sig != IONIC_DEV_INFO_SIGNATURE) {
 		dev_err(ionic->dev, "Incompatible firmware signature %x", sig);
 		return -EFAULT;
 	}
+
+	/* save the idev ptr into dev->platform_data so we can
+	 * use it later when setting up msixcfg
+	 */
+	platform_device_add_data(ionic->pfdev, &idev, sizeof(idev));
 
 	ionic_init_devinfo(ionic);
 	err = ionic_watchdog_init(ionic);
@@ -351,21 +353,21 @@ static int ionic_probe(struct platform_device *pfdev)
 	err = ionic_identify(ionic);
 	if (err) {
 		dev_err(dev, "Cannot identify device: %d, aborting\n", err);
-		goto err_out_unmap_bars;
+		goto err_out_plat_data;
 	}
 	ionic_debugfs_add_ident(ionic);
 
 	err = ionic_init(ionic);
 	if (err) {
 		dev_err(dev, "Cannot init device: %d, aborting\n", err);
-		goto err_out_unmap_bars;
+		goto err_out_plat_data;
 	}
 
 	/* Configure the ports */
 	err = ionic_port_identify(ionic);
 	if (err) {
 		dev_err(dev, "Cannot identify port: %d, aborting\n", err);
-		goto err_out_unmap_bars;
+		goto err_out_plat_data;
 	}
 
 	if (ionic->ident.port.type == IONIC_ETH_HOST_MGMT ||
@@ -375,14 +377,14 @@ static int ionic_probe(struct platform_device *pfdev)
 	err = ionic_port_init(ionic);
 	if (err) {
 		dev_err(dev, "Cannot init port: %d, aborting\n", err);
-		goto err_out_unmap_bars;
+		goto err_out_plat_data;
 	}
 
 	/* Allocate and init the LIF */
 	err = ionic_lif_size(ionic);
 	if (err) {
 		dev_err(dev, "Cannot size LIF: %d, aborting\n", err);
-		goto err_out_unmap_bars;
+		goto err_out_plat_data;
 	}
 
 	err = ionic_lif_alloc(ionic);
@@ -416,6 +418,9 @@ err_out_free_lifs:
 	ionic->lif = NULL;
 err_out_free_irqs:
 	ionic_bus_free_irq_vectors(ionic);
+err_out_plat_data:
+	platform_device_add_data(pfdev, ionic->mnet_netdev_name,
+				 sizeof(ionic->mnet_netdev_name));
 err_out_unmap_bars:
 	del_timer_sync(&ionic->watchdog_timer);
 	if (ionic->wq)
@@ -455,6 +460,10 @@ static int ionic_remove(struct platform_device *pfdev)
 	ionic_unmap_bars(ionic);
 	ionic_debugfs_del_dev(ionic);
 	mutex_destroy(&ionic->dev_cmd_lock);
+
+	/* put the name back for future driver use */
+	platform_device_add_data(pfdev, ionic->mnet_netdev_name,
+				 sizeof(ionic->mnet_netdev_name));
 
 	return 0;
 }
