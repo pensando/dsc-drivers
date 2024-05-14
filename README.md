@@ -208,3 +208,8 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 24-04-25 - driver update for 24.04.2-002
  - reworked ionic's missed-doorbell fix to reduce latency and throughput issues seen
  - ionic_mnic work in preparation for future platform device model changes
+
+24-05-13 - driver update for 24.05.1-001
+  - rework of platform_device management to better follow kernel device model
+  - refinements on missed-doorbell workaround
+  - whitespace and comment cleanup in ionic_if.h
