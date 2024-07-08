@@ -6922,7 +6922,9 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #endif /* 6.3 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 5, 0) > LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 5, 0) > LINUX_VERSION_CODE && \
+	(!RHEL_RELEASE_CODE || \
+	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 4)))
 #ifdef HAVE_NET_XDP_FRAGS
 static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 					   struct page *page,
@@ -6951,6 +6953,13 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 #ifdef CONFIG_SUSE_KERNEL
 #undef CONFIG_PTP_1588_CLOCK
 #undef CONFIG_PTP_1588_CLOCK_MODULE
+#endif
+
+#if GCC_VERSION < 70100 || \
+	(SLE_VERSION_CODE && (SLE_VERSION_CODE < SLE_VERSION(15, 3, 0)))  || \
+	(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 0)   || \
+			       RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 1)))
+# define fallthrough                    do {} while (0)  /* fallthrough */
 #endif
 
 #endif /* _KCOMPAT_H_ */

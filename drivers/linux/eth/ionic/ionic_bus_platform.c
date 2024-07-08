@@ -441,13 +441,14 @@ static int ionic_remove(struct platform_device *pfdev)
 		set_bit(IONIC_LIF_F_IN_SHUTDOWN, ionic->lif->state);
 
 	del_timer_sync(&ionic->watchdog_timer);
-	destroy_workqueue(ionic->wq);
 
 	if (ionic->lif) {
 		/* prevent adminq cmds if already known as down */
 		if (test_and_clear_bit(IONIC_LIF_F_FW_RESET, ionic->lif->state))
 			set_bit(IONIC_LIF_F_FW_STOPPING, ionic->lif->state);
 
+		if (ionic->lif->doorbell_wa)
+			cancel_delayed_work_sync(&ionic->doorbell_check_dwork);
 		ionic_lif_unregister(ionic->lif);
 		ionic_lif_deinit(ionic->lif);
 		ionic_lif_free(ionic->lif);
@@ -457,6 +458,7 @@ static int ionic_remove(struct platform_device *pfdev)
 
 	ionic_port_reset(ionic);
 	ionic_reset(ionic);
+	destroy_workqueue(ionic->wq);
 	ionic_unmap_bars(ionic);
 	ionic_debugfs_del_dev(ionic);
 	mutex_destroy(&ionic->dev_cmd_lock);

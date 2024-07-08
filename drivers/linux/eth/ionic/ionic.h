@@ -77,7 +77,6 @@ struct ionic {
 #endif
 	cpumask_var_t *affinity_masks;
 	struct delayed_work doorbell_check_dwork;
-	struct work_struct nb_work;
 	struct notifier_block nb;
 #ifdef IONIC_DEVLINK
 	struct devlink_port dl_port;

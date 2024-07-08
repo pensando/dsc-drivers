@@ -146,12 +146,11 @@ enum ionic_notifyq_opcode {
  * @vf_index:       VF Index.
  * @upt_cmd_data:   UPT specific command bytes
  */
-
 struct ionic_upt_cmd {
 	u8         opcode;
 	u8         rsvd;
-	__le16     vf_index;
-	u8         rsvd1[4];
+	__le16	   vf_index;
+	u8	   rsvd1[4];
 	u8         upt_cmd_data[56];
 };
 IONIC_CHECK_CMD_LENGTH(ionic_upt_cmd);
@@ -525,7 +524,7 @@ enum ionic_txq_feature {
 };
 
 /**
- * struct ionic_hwstamp_bits - Hardware timestamp decoding bits
+ * enum ionic_hwstamp_bits - Hardware timestamp decoding bits
  * @IONIC_HWSTAMP_INVALID:          Invalid hardware timestamp value
  * @IONIC_HWSTAMP_CQ_NEGOFFSET:     Timestamp field negative offset
  *                                  from the base cq descriptor.
@@ -2611,9 +2610,9 @@ IONIC_CHECK_COMP_LENGTH(ionic_hii_init_comp);
 
 /**
  * enum ionic_hii_attr - List of HII attributes
- * @IONIC_HII_ATTR_OOB_EN:      HII OOB enable atrribute
- * @IONIC_HII_ATTR_UID_LED:	HII set UID led atrribute
- * @IONIC_HII_ATTR_VLAN:        HII PXE vlan atrribute
+ * @IONIC_HII_ATTR_OOB_EN:      HII OOB enable attribute
+ * @IONIC_HII_ATTR_UID_LED:	HII set UID led attribute
+ * @IONIC_HII_ATTR_VLAN:        HII PXE vlan attribute
  */
 enum ionic_hii_attr {
 	IONIC_HII_ATTR_OOB_EN	= 0,
@@ -3330,12 +3329,12 @@ union ionic_dev_cmd_comp {
 	struct ionic_upt_comp upt_comp;
 };
 
+#define IONIC_DEVINFO_OPROM_RESERVED   31
 /**
  * struct ionic_oprom_regs - Oprom debug/enable and bmp registers
  * @oprom_log_level: Variables indicates whether Oprom log to be printed or not
  * @oprom_reserved : Reserved for future use and make it as 32 byte alignment of oprom_regs.
  */
-#define IONIC_DEVINFO_OPROM_RESERVED   31
 struct ionic_oprom_regs {
 	u8    oprom_log_level;
 	u8    oprom_reserved[IONIC_DEVINFO_OPROM_RESERVED];
