@@ -246,7 +246,7 @@ static int ionic_request_irq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		name = dev_name(dev);
 
 	snprintf(intr->name, sizeof(intr->name),
-		 "%s-%s-%s", IONIC_DRV_NAME, name, q->name);
+		 "%.5s-%.16s-%.8s", IONIC_DRV_NAME, name, q->name);
 
 	return devm_request_irq(dev, intr->vector, ionic_isr,
 				0, intr->name, &qcq->napi);
@@ -258,8 +258,8 @@ int ionic_intr_alloc(struct ionic *ionic, struct ionic_intr_info *intr)
 
 	index = find_first_zero_bit(ionic->intrs, ionic->nintrs);
 	if (index == ionic->nintrs) {
-		dev_warn(ionic->dev, "%s: no intr, index=%d nintrs=%d\n",
-			 __func__, index, ionic->nintrs);
+		netdev_warn(ionic->lif->netdev, "%s: no intr, index=%d nintrs=%d\n",
+			    __func__, index, ionic->nintrs);
 		return -ENOSPC;
 	}
 
@@ -319,10 +319,8 @@ static int ionic_qcq_enable(struct ionic_qcq *qcq)
 	if (ret)
 		return ret;
 
-	if (qcq->napi.poll)
-		napi_enable(&qcq->napi);
-
 	if (qcq->flags & IONIC_QCQ_F_INTR) {
+		napi_enable(&qcq->napi);
 		irq_set_affinity_notifier(qcq->intr.vector,
 					  &qcq->intr.aff_notify);
 		irq_set_affinity_hint(qcq->intr.vector,
@@ -353,11 +351,6 @@ static int ionic_qcq_disable(struct ionic_lif *lif, struct ionic_qcq *qcq, int f
 
 	q = &qcq->q;
 
-	if (qcq->napi.poll) {
-		napi_disable(&qcq->napi);
-		synchronize_net();
-	}
-
 	if (qcq->flags & IONIC_QCQ_F_INTR) {
 		struct ionic_dev *idev = &lif->ionic->idev;
 
@@ -369,6 +362,7 @@ static int ionic_qcq_disable(struct ionic_lif *lif, struct ionic_qcq *qcq, int f
 		synchronize_irq(qcq->intr.vector);
 		irq_set_affinity_notifier(qcq->intr.vector, NULL);
 		irq_set_affinity_hint(qcq->intr.vector, NULL);
+		napi_disable(&qcq->napi);
 	}
 
 	/* If there was a previous fw communcation error, don't bother with
@@ -518,7 +512,6 @@ static void ionic_link_qcq_interrupts(struct ionic_qcq *src_qcq,
 static int ionic_alloc_qcq_interrupt(struct ionic_lif *lif, struct ionic_qcq *qcq)
 {
 	cpumask_var_t *affinity_mask;
-	unsigned int cpu;
 	int err;
 
 	if (!(qcq->flags & IONIC_QCQ_F_INTR)) {
@@ -551,8 +544,9 @@ static int ionic_alloc_qcq_interrupt(struct ionic_lif *lif, struct ionic_qcq *qc
 
 	affinity_mask = &lif->ionic->affinity_masks[qcq->intr.index];
 	if (affinity_mask_override) {
-		cpumask_copy(*affinity_mask, cpu_none_mask);
+		unsigned int cpu;
 
+		cpumask_copy(*affinity_mask, cpu_none_mask);
 		netdev_dbg(lif->netdev, "%s: setting irq affinity_mask 0x%lx\n",
 				qcq->q.name, affinity_mask_override);
 		for (cpu = 0; cpu < num_present_cpus(); cpu++) {
@@ -1265,7 +1259,7 @@ static int ionic_adminq_napi(struct napi_struct *napi, int budget)
 					   ionic_rx_service, NULL, NULL);
 
 	if (lif->hwstamp_txq)
-		tx_work = ionic_tx_cq_service(&lif->hwstamp_txq->cq, budget);
+		tx_work = ionic_tx_cq_service(&lif->hwstamp_txq->cq, budget, !!budget);
 
 	work_done = max(max(n_work, a_work), max(rx_work, tx_work));
 	if (work_done < budget && napi_complete_done(napi, work_done)) {
@@ -1908,13 +1902,13 @@ static int ionic_change_mtu(struct net_device *netdev, int new_mtu)
 
 	/* if we're not running, nothing much to do */
 	if (!netif_running(lif->netdev)) {
-		netdev->mtu = new_mtu;
+		WRITE_ONCE(netdev->mtu, new_mtu);
 		return 0;
 	}
 
 	mutex_lock(&lif->queue_lock);
 	ionic_stop_queues_reconfig(lif);
-	netdev->mtu = new_mtu;
+	WRITE_ONCE(netdev->mtu, new_mtu);
 	err = ionic_start_queues_reconfig(lif);
 	mutex_unlock(&lif->queue_lock);
 
@@ -3389,7 +3383,7 @@ static int ionic_affinity_masks_alloc(struct ionic *ionic)
 
 	affinity_masks = kcalloc(nintrs, sizeof(cpumask_var_t), GFP_KERNEL);
 	if (!affinity_masks)
-		return	-ENOMEM;
+		return -ENOMEM;
 
 	for (i = 0; i < nintrs; i++) {
 		if (!zalloc_cpumask_var_node(&affinity_masks[i], GFP_KERNEL,
@@ -3770,8 +3764,6 @@ void ionic_lif_deinit(struct ionic_lif *lif)
 	if (!test_and_clear_bit(IONIC_LIF_F_INITED, lif->state))
 		return;
 
-	if (lif->doorbell_wa)
-		cancel_delayed_work_sync(&lif->ionic->doorbell_check_dwork);
 	if (!test_bit(IONIC_LIF_F_FW_RESET, lif->state)) {
 		cancel_work_sync(&lif->deferred.work);
 		cancel_work_sync(&lif->tx_timeout_work);
@@ -4052,10 +4044,6 @@ err_out_free_dbid:
 	return err;
 }
 
-static void ionic_lif_notify_work(struct work_struct *ws)
-{
-}
-
 static void ionic_lif_set_netdev_info(struct ionic_lif *lif)
 {
 	struct ionic_admin_ctx ctx = {
@@ -4106,8 +4094,6 @@ int ionic_lif_register(struct ionic_lif *lif)
 
 	ionic_lif_register_phc(lif);
 
-	INIT_WORK(&lif->ionic->nb_work, ionic_lif_notify_work);
-
 	lif->ionic->nb.notifier_call = ionic_lif_notify;
 
 	err = register_netdevice_notifier(&lif->ionic->nb);
@@ -4117,8 +4103,8 @@ int ionic_lif_register(struct ionic_lif *lif)
 	/* only register LIF0 for now */
 	err = register_netdev(lif->netdev);
 	if (err) {
-		dev_err(lif->ionic->dev, "Cannot register net device, aborting\n");
-		ionic_lif_unregister_phc(lif);
+		dev_err(lif->ionic->dev, "Cannot register net device: %d, aborting\n", err);
+		ionic_lif_unregister(lif);
 		return err;
 	}
 
@@ -4133,7 +4119,6 @@ void ionic_lif_unregister(struct ionic_lif *lif)
 {
 	if (lif->ionic->nb.notifier_call) {
 		unregister_netdevice_notifier(&lif->ionic->nb);
-		cancel_work_sync(&lif->ionic->nb_work);
 		lif->ionic->nb.notifier_call = NULL;
 	}
 

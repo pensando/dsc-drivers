@@ -469,6 +469,8 @@ static void ionic_remove(struct pci_dev *pdev)
 		if (test_and_clear_bit(IONIC_LIF_F_FW_RESET, ionic->lif->state))
 			set_bit(IONIC_LIF_F_FW_STOPPING, ionic->lif->state);
 
+		if (ionic->lif->doorbell_wa)
+			cancel_delayed_work_sync(&ionic->doorbell_check_dwork);
 		ionic_lif_unregister(ionic->lif);
 		ionic_devlink_unregister(ionic);
 		ionic_lif_deinit(ionic->lif);
@@ -502,6 +504,7 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	 * device triggered resets with userspace triggered resets).
 	 */
 	del_timer_sync(&ionic->watchdog_timer);
+	cancel_work_sync(&lif->deferred.work);
 
 	mutex_lock(&lif->queue_lock);
 	ionic_stop_queues_reconfig(lif);
@@ -545,14 +548,12 @@ err_out:
 static pci_ers_result_t ionic_pci_error_detected(struct pci_dev *pdev,
 						 pci_channel_state_t error)
 {
-	pci_ers_result_t result = PCI_ERS_RESULT_NONE;
-
 	if (error == pci_channel_io_frozen) {
 		ionic_reset_prepare(pdev);
-		result = PCI_ERS_RESULT_NEED_RESET;
+		return PCI_ERS_RESULT_NEED_RESET;
 	}
 
-	return result;
+	return PCI_ERS_RESULT_NONE;
 }
 
 static void ionic_pci_error_resume(struct pci_dev *pdev)
@@ -571,8 +572,6 @@ static const struct pci_error_handlers ionic_err_handler = {
 
 	/* PCI bus error detected on this device */
 	.error_detected     = ionic_pci_error_detected,
-
-	/* Device driver may resume normal operations */
 	.resume		    = ionic_pci_error_resume,
 };
 #endif

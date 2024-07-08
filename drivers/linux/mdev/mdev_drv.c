@@ -46,6 +46,7 @@ struct mdev_dev {
 	struct platform_device *pdev;
 	struct list_head node;
 	enum mdev_type type;
+	char intf_name[MDEV_NAME_LEN + 1];
 };
 
 LIST_HEAD(mdev_list);
@@ -404,6 +405,7 @@ static int mdev_attach_one(struct mdev_dev *mdev,
 	dev_info(mdev_device, "%s created successfully on %s\n",
 		 req->name, mdev->of_node->name);
 
+	(void)strscpy(mdev->intf_name, req->name, sizeof(mdev->intf_name) - 1);
 	return 0;
 
 err_free_pdev:
@@ -414,16 +416,14 @@ err_out:
 
 static void mdev_detach_one(struct mdev_dev *mdev)
 {
-	const char *name = mdev->pdev->name;
-
-	dev_info(mdev_device, "Removing interface %s\n", mdev->pdev->name);
+	dev_info(mdev_device, "Removing interface %s\n", mdev->intf_name);
 
 	/* This will trigger the driver remove() */
 	platform_device_unregister(mdev->pdev);
-	kfree(mdev->pdev);
 	mdev->pdev = NULL;
 
-	dev_info(mdev_device, "Successfully removed %s\n", name);
+	dev_info(mdev_device, "Successfully removed %s\n", mdev->intf_name);
+	memset(mdev->intf_name, 0, sizeof(mdev->intf_name));
 }
 
 static inline bool mdev_ioctl_matches(struct mdev_dev *mdev, unsigned int cmd)
@@ -463,7 +463,7 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		 */
 		list_for_each_entry(mdev, &mdev_list, node) {
 			if (mdev->pdev &&
-			    !strncmp(mdev->pdev->name, req.name, MDEV_NAME_LEN)) {
+			    !strncmp(mdev->intf_name, req.name, MDEV_NAME_LEN)) {
 				mutex_unlock(&mdev_list_lock);
 				return 0;
 			}
@@ -493,11 +493,12 @@ static long mdev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		mutex_lock(&mdev_list_lock);
 		list_for_each_entry(mdev, &mdev_list, node) {
 			if (!mdev->pdev ||
-			    strncmp(mdev->pdev->name, name, MDEV_NAME_LEN))
+			    strncmp(mdev->intf_name, name, MDEV_NAME_LEN))
 				continue;
 
 			ret = 0;
 			mdev_detach_one(mdev);
+
 			break;
 		}
 		mutex_unlock(&mdev_list_lock);

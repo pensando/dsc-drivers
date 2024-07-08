@@ -213,3 +213,8 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
   - rework of platform_device management to better follow kernel device model
   - refinements on missed-doorbell workaround
   - whitespace and comment cleanup in ionic_if.h
+
+24-07-08 - driver update for 24.06.2-002
+ - ionic header files moved from common to eth/ionic
+ - upstream code sync
+ - various code cleanups

@@ -27,7 +27,11 @@ DECLARE_EVENT_CLASS(ionic_q_start_stop_template,
 	),
 
 	TP_fast_assign(__entry->index = q->index;
+#if (KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE)
+		       __assign_str(devname);
+#else
 		       __assign_str(devname, q->lif->netdev->name);
+#endif
 	),
 
 	TP_printk("%s: queue[%u]", __get_str(devname), __entry->index)

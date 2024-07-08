@@ -54,11 +54,9 @@ void ionic_watchdog_cb(struct timer_list *t)
 
 static void ionic_napi_schedule_do_softirq(struct napi_struct *napi)
 {
-	if (napi_schedule_prep(napi)) {
-		local_bh_disable();
-		__napi_schedule(napi);
-		local_bh_enable();
-	}
+	local_bh_disable();
+	napi_schedule(napi);
+	local_bh_enable();
 }
 
 void ionic_doorbell_napi_work(struct work_struct *work)
@@ -105,11 +103,14 @@ static void ionic_doorbell_check_dwork(struct work_struct *work)
 					   doorbell_check_dwork.work);
 	struct ionic_lif *lif = ionic->lif;
 
-	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state) ||
-	    test_bit(IONIC_LIF_F_FW_RESET, lif->state))
-		return;
-
 	mutex_lock(&lif->queue_lock);
+
+	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state) ||
+	    test_bit(IONIC_LIF_F_FW_RESET, lif->state)) {
+		mutex_unlock(&lif->queue_lock);
+		return;
+	}
+
 	ionic_napi_schedule_do_softirq(&lif->adminqcq->napi);
 
 	if (test_bit(IONIC_LIF_F_UP, lif->state)) {
@@ -272,6 +273,7 @@ int ionic_dev_setup(struct ionic *ionic)
 	size = BITS_TO_LONGS(idev->cmb_npages) * sizeof(long);
 	idev->cmb_inuse = kzalloc(size, GFP_KERNEL);
 	if (!idev->cmb_inuse) {
+		dev_warn(dev, "No memory for CMB, disabling\n");
 		idev->phy_cmb_pages = 0;
 		idev->cmb_npages = 0;
 	}
@@ -293,19 +295,29 @@ void ionic_dev_teardown(struct ionic *ionic)
 }
 
 /* Devcmd Interface */
-bool ionic_is_fw_running(struct ionic_dev *idev)
+static bool __ionic_is_fw_running(struct ionic_dev *idev, u8 *status_ptr)
 {
 	u8 fw_status;
 
-	if (!idev->dev_info_regs)
+	if (!idev->dev_info_regs) {
+		if (status_ptr)
+			*status_ptr = 0xff;
 		return false;
+	}
 
 	fw_status = ioread8(&idev->dev_info_regs->fw_status);
+	if (status_ptr)
+		*status_ptr = fw_status;
 
 	/* firmware is useful only if the running bit is set and
 	 * fw_status != 0xff (bad PCI read)
 	 */
 	return (fw_status != 0xff) && (fw_status & IONIC_FW_STS_F_RUNNING);
+}
+
+bool ionic_is_fw_running(struct ionic_dev *idev)
+{
+	return __ionic_is_fw_running(idev, NULL);
 }
 
 int ionic_heartbeat_check(struct ionic *ionic)
@@ -333,10 +345,8 @@ do_check_time:
 		goto do_check_time;
 	}
 
-	fw_status = ioread8(&idev->dev_info_regs->fw_status);
-
 	/* If fw_status is not ready don't bother with the generation */
-	if (!ionic_is_fw_running(idev)) {
+	if (!__ionic_is_fw_running(idev, &fw_status)) {
 		fw_status_ready = false;
 	} else {
 		fw_generation = fw_status & IONIC_FW_STS_F_GENERATION;

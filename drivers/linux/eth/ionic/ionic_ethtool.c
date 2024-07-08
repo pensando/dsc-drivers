@@ -24,6 +24,8 @@ enum {
 #include "ionic_ethtool.h"
 #include "ionic_stats.h"
 
+#define IONIC_MAX_RX_COPYBREAK	min_t(u32, U16_MAX, IONIC_MAX_BUF_LEN)
+
 static const char ionic_priv_flags_strings[][ETH_GSTRING_LEN] = {
 #define IONIC_PRIV_F_RDMA_SNIFFER	BIT(0)
 	"rdma-sniffer",
@@ -1149,15 +1151,14 @@ static int ionic_set_tunable(struct net_device *dev,
 			     const void *data)
 {
 	struct ionic_lif *lif = netdev_priv(dev);
-	u32 rx_copybreak, max_rx_copybreak;
+	u32 rx_copybreak;
 
 	switch (tuna->id) {
 	case ETHTOOL_RX_COPYBREAK:
 		rx_copybreak = *(u32 *)data;
-		max_rx_copybreak = min_t(u32, U16_MAX, IONIC_MAX_BUF_LEN);
-		if (rx_copybreak > max_rx_copybreak) {
+		if (rx_copybreak > IONIC_MAX_RX_COPYBREAK) {
 			netdev_err(dev, "Max supported rx_copybreak size: %u\n",
-				   max_rx_copybreak);
+				   IONIC_MAX_RX_COPYBREAK);
 			return -EINVAL;
 		}
 		lif->rx_copybreak = (u16)rx_copybreak;

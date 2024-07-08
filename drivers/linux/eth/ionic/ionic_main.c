@@ -378,10 +378,9 @@ bool ionic_adminq_service(struct ionic_cq *cq)
 			dev_dbg(q->dev, "comp admin queue command:\n");
 			dynamic_hex_dump("comp ", DUMP_PREFIX_OFFSET, 16, 1,
 					 &ctx->comp, sizeof(ctx->comp), true);
-
 			complete_all(&ctx->work);
+			desc_info->ctx = NULL;
 		}
-		desc_info->ctx = NULL;
 	} while (index != le16_to_cpu(comp->comp_index));
 
 	return true;
@@ -874,6 +873,7 @@ static int __init ionic_init_module(void)
 {
 	unsigned long max_affinity = GENMASK_ULL((min(num_present_cpus(),
 					(unsigned int)(sizeof(unsigned long)*BITS_PER_BYTE))-1), 0);
+	int ret;
 
 	pr_info("%s %s, ver %s\n",
 		IONIC_DRV_NAME, IONIC_DRV_DESCRIPTION, IONIC_DRV_VERSION);
@@ -892,7 +892,11 @@ static int __init ionic_init_module(void)
 		}
 	}
 
-	return ionic_bus_register_driver();
+	ret = ionic_bus_register_driver();
+	if (ret)
+		ionic_debugfs_destroy();
+
+	return ret;
 }
 
 static void __exit ionic_cleanup_module(void)
