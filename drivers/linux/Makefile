@@ -32,7 +32,11 @@ KMOD_SRC_DIR ?= ${TOPDIR}/platform/drivers/linux-ionic
 ETH_KOPT += CONFIG_IONIC_MNIC=m
 ETH_KOPT += CONFIG_MDEV=m
 ETH_KOPT += CONFIG_MNET_UIO_PDRV_GENIRQ=m
+ifeq ($(TOOLCHAIN_VERSION),11)
+KOPT += CROSS_COMPILE=aarch64-none-linux-gnu-
+else
 KOPT += CROSS_COMPILE=aarch64-linux-gnu-
+endif
 KOPT += ARCH=arm64
 KCFLAGS += -DCONFIG_IONIC_MNIC
 KCFLAGS += -DCONFIG_MDEV
@@ -69,7 +73,7 @@ ALL = eth
 endif
 
 ifeq ($(DVER),)
-    DVER = "24.06.2-002"
+    DVER = "24.07.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 

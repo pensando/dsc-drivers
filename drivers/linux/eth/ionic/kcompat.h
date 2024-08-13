@@ -6845,8 +6845,13 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #define txq_trans_cond_update txq_trans_update
 #endif
 
+#define MSI_INDEX(desc)			desc->platform.msi_index
+#define MSI_FOR_EACH_DESC(desc, dev)	for_each_msi_entry((desc), dev)
+
 #else
 #define HAVE_RINGPARAM_EXTACK
+#define MSI_INDEX(desc)			desc->msi_index
+#define MSI_FOR_EACH_DESC(desc, dev)	msi_for_each_desc((desc), dev, MSI_DESC_ALL)
 #endif /* 5.17 */
 
 #ifndef PCI_ERROR_RESPONSE

@@ -126,10 +126,10 @@ int ionic_bus_get_irq(struct ionic *ionic, unsigned int num)
 	struct msi_desc *desc;
 	int i = 0;
 
-	for_each_msi_entry(desc, ionic->dev) {
+	MSI_FOR_EACH_DESC(desc, ionic->dev) {
 		if (i == num) {
 			dev_info(ionic->dev, "[i = %d] msi_entry: %d.%d\n",
-				 i, desc->platform.msi_index, desc->irq);
+				 i, MSI_INDEX(desc), desc->irq);
 
 			return desc->irq;
 		}
@@ -147,10 +147,10 @@ const char *ionic_bus_info(struct ionic *ionic)
 static void ionic_mnic_set_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 {
 	dev_dbg(desc->dev, "msi_index: [%d] (msi_addr hi_lo): %x_%x msi_data: %x\n",
-		desc->platform.msi_index, msg->address_hi,
+		MSI_INDEX(desc), msg->address_hi,
 		msg->address_lo, msg->data);
 
-	ionic_intr_msixcfg(desc->dev, desc->platform.msi_index,
+	ionic_intr_msixcfg(desc->dev, MSI_INDEX(desc),
 			   (((u64)msg->address_hi << 32) | msg->address_lo),
 			   msg->data, 0/*vctrl*/);
 }
