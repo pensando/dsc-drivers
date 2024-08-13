@@ -218,3 +218,8 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - ionic header files moved from common to eth/ionic
  - upstream code sync
  - various code cleanups
+
+24-08-13 - driver update for 24.07.1-001
+ - fix a bogus tx_timeout alarm
+ - add ability to build mdev on a newer kernel
+ - add int_mnic ip field in dev_info struct

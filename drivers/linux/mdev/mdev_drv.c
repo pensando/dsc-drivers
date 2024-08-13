@@ -583,7 +583,11 @@ static int __init mdev_init(void)
 {
 	int ret;
 
+#if (KERNEL_VERSION(6, 4, 0) > LINUX_VERSION_CODE)
 	mdev_class = class_create(THIS_MODULE, DRV_NAME);
+#else
+	mdev_class = class_create(DRV_NAME);
+#endif
 	if (IS_ERR(mdev_class)) {
 		ret = PTR_ERR(mdev_class);
 		goto error_out;

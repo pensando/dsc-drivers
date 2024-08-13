@@ -3455,7 +3455,7 @@ int ionic_lif_alloc(struct ionic *ionic)
 		netdev->netdev_ops = &ionic_netdev_ops;
 
 	ionic_ethtool_set_ops(netdev);
-	netdev->watchdog_timeo = 2 * HZ;
+	netdev->watchdog_timeo = 5 * HZ;
 	netif_carrier_off(netdev);
 
 	lif->nrdma_eqs_avail = ionic->nrdma_eqs_per_lif;

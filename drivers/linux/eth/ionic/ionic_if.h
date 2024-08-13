@@ -3364,6 +3364,7 @@ struct ionic_hwstamp_regs {
  * @serial_num:      Serial number
  * @fw_version:      Firmware version
  * @oprom_regs:      oprom_regs to store oprom debug enable/disable and bmp
+ * @int_mnic_ip:     Int mnic ip address 169.254.<port>.1, byte 3 is 169
  * @hwstamp:         Hardware current timestamp registers
  */
 union ionic_dev_info_regs {
@@ -3381,7 +3382,8 @@ union ionic_dev_info_regs {
 		char   fw_version[IONIC_DEVINFO_FWVERS_BUFLEN];
 		char   serial_num[IONIC_DEVINFO_SERIAL_BUFLEN];
 		struct ionic_oprom_regs oprom_regs;
-		u8     rsvd_pad1024[916];
+		u8     int_mnic_ip[4];
+		u8     rsvd_pad1024[912];
 		struct ionic_hwstamp_regs hwstamp;
 	};
 	u32 words[512];
