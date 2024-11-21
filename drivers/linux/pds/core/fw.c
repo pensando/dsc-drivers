@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2022 Pensando Systems, Inc */
-
-#include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/errno.h>
-#include <linux/firmware.h>
+/* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
 #include "core.h"
 
@@ -19,8 +14,8 @@
 /* Number of periodic log updates during fw file download */
 #define PDSC_FW_INTERVAL_FRACTION	32
 
-static int pdsc_devcmd_firmware_download(struct pdsc *pdsc, u64 addr,
-					 u32 offset, u32 length)
+static int pdsc_devcmd_fw_download_locked(struct pdsc *pdsc, u64 addr,
+					  u32 offset, u32 length)
 {
 	union pds_core_dev_cmd cmd = {
 		.fw_download.opcode = PDS_CORE_CMD_FW_DOWNLOAD,
@@ -33,7 +28,7 @@ static int pdsc_devcmd_firmware_download(struct pdsc *pdsc, u64 addr,
 	return pdsc_devcmd_locked(pdsc, &cmd, &comp, pdsc->devcmd_timeout);
 }
 
-static int pdsc_devcmd_firmware_install(struct pdsc *pdsc)
+static int pdsc_devcmd_fw_install(struct pdsc *pdsc)
 {
 	union pds_core_dev_cmd cmd = {
 		.fw_control.opcode = PDS_CORE_CMD_FW_CONTROL,
@@ -49,8 +44,8 @@ static int pdsc_devcmd_firmware_install(struct pdsc *pdsc)
 	return comp.fw_control.slot;
 }
 
-static int pdsc_devcmd_firmware_activate(struct pdsc *pdsc,
-					 enum pds_core_fw_slot slot)
+static int pdsc_devcmd_fw_activate(struct pdsc *pdsc,
+				   enum pds_core_fw_slot slot)
 {
 	union pds_core_dev_cmd cmd = {
 		.fw_control.opcode = PDS_CORE_CMD_FW_CONTROL,
@@ -91,7 +86,8 @@ static int pdsc_fw_status_long_wait(struct pdsc *pdsc,
 
 	if (err == -EAGAIN || err == -ETIMEDOUT) {
 		NL_SET_ERR_MSG_MOD(extack, "Firmware wait timed out");
-		dev_err(pdsc->dev, "DEV_CMD firmware wait %s timed out\n", label);
+		dev_err(pdsc->dev, "DEV_CMD firmware wait %s timed out\n",
+			label);
 	} else if (err) {
 		NL_SET_ERR_MSG_MOD(extack, "Firmware wait failed");
 	}
@@ -107,12 +103,16 @@ int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 	int next_interval;
 	u64 data_addr;
 	int err = 0;
-	u8 fw_slot;
+	int fw_slot;
 
 	dev_info(pdsc->dev, "Installing firmware\n");
 
+	if (!pdsc->cmd_regs)
+		return -ENXIO;
+
 	dl = priv_to_devlink(pdsc);
-	devlink_flash_update_status_notify(dl, "Preparing to flash", NULL, 0, 0);
+	devlink_flash_update_status_notify(dl, "Preparing to flash",
+					   NULL, 0, 0);
 
 	buf_sz = sizeof(pdsc->cmd_regs->data);
 
@@ -125,15 +125,18 @@ int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 	data_addr = offsetof(struct pds_core_dev_cmd_regs, data);
 	while (offset < fw->size) {
 		if (offset >= next_interval) {
-			devlink_flash_update_status_notify(dl, "Downloading", NULL,
-							   offset, fw->size);
-			next_interval = offset + (fw->size / PDSC_FW_INTERVAL_FRACTION);
+			devlink_flash_update_status_notify(dl, "Downloading",
+							   NULL, offset,
+							   fw->size);
+			next_interval = offset +
+					(fw->size / PDSC_FW_INTERVAL_FRACTION);
 		}
 
 		copy_sz = min_t(unsigned int, buf_sz, fw->size - offset);
 		mutex_lock(&pdsc->devcmd_lock);
 		memcpy_toio(&pdsc->cmd_regs->data, fw->data + offset, copy_sz);
-		err = pdsc_devcmd_firmware_download(pdsc, data_addr, offset, copy_sz);
+		err = pdsc_devcmd_fw_download_locked(pdsc, data_addr,
+						     offset, copy_sz);
 		mutex_unlock(&pdsc->devcmd_lock);
 		if (err) {
 			dev_err(pdsc->dev,
@@ -150,7 +153,7 @@ int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 	devlink_flash_update_timeout_notify(dl, "Installing", NULL,
 					    PDSC_FW_INSTALL_TIMEOUT);
 
-	fw_slot = pdsc_devcmd_firmware_install(pdsc);
+	fw_slot = pdsc_devcmd_fw_install(pdsc);
 	if (fw_slot < 0) {
 		err = fw_slot;
 		dev_err(pdsc->dev, "install failed: %pe\n", ERR_PTR(err));
@@ -168,7 +171,7 @@ int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 	devlink_flash_update_timeout_notify(dl, "Selecting", NULL,
 					    PDSC_FW_SELECT_TIMEOUT);
 
-	err = pdsc_devcmd_firmware_activate(pdsc, fw_slot);
+	err = pdsc_devcmd_fw_activate(pdsc, fw_slot);
 	if (err) {
 		NL_SET_ERR_MSG_MOD(extack, "Failed to start firmware select");
 		goto err_out;
@@ -185,8 +188,10 @@ int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 
 err_out:
 	if (err)
-		devlink_flash_update_status_notify(dl, "Flash failed", NULL, 0, 0);
+		devlink_flash_update_status_notify(dl, "Flash failed",
+						   NULL, 0, 0);
 	else
-		devlink_flash_update_status_notify(dl, "Flash done", NULL, 0, 0);
+		devlink_flash_update_status_notify(dl, "Flash done",
+						   NULL, 0, 0);
 	return err;
 }

@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Copyright(c) 2022 Pensando Systems, Inc
+# Copyright(c) 2023 Advanced Micro Devices, Inc
 
 obj-$(CONFIG_PDS_VDPA) := pds_vdpa.o
 
-ccflags-y := -g -I$(src)
-subdir-ccflags-y += -I$(src)/../../../common
-
-pds_vdpa-y := aux_drv.o	\
-	      cmds.o	\
-	      pci_drv.o	\
-	      debugfs.o \
+pds_vdpa-y := aux_drv.o \
+	      cmds.o \
 	      virtio_pci.o \
+	      debugfs.o \
 	      vdpa_dev.o
-

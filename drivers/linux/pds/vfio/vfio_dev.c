@@ -1,15 +1,25 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* Copyright(c) 2022 Pensando Systems, Inc */
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2023 Advanced Micro Devices, Inc. */
 
 #include <linux/vfio.h>
 #include <linux/vfio_pci_core.h>
+#include <linux/version.h>
 
 #include "lm.h"
+#include "dirty.h"
 #include "vfio_dev.h"
-#include "aux_drv.h"
 
-struct pds_vfio_pci_device *
-pds_vfio_pci_drvdata(struct pci_dev *pdev)
+struct pci_dev *pds_vfio_to_pci_dev(struct pds_vfio_pci_device *pds_vfio)
+{
+	return pds_vfio->vfio_coredev.pdev;
+}
+
+struct device *pds_vfio_to_dev(struct pds_vfio_pci_device *pds_vfio)
+{
+	return &pds_vfio_to_pci_dev(pds_vfio)->dev;
+}
+
+struct pds_vfio_pci_device *pds_vfio_pci_drvdata(struct pci_dev *pdev)
 {
 	struct vfio_pci_core_device *core_device = dev_get_drvdata(&pdev->dev);
 
@@ -17,72 +27,36 @@ pds_vfio_pci_drvdata(struct pci_dev *pdev)
 			    vfio_coredev);
 }
 
-void
-pds_vfio_state_mutex_unlock(struct pds_vfio_pci_device *pds_vfio)
+void pds_vfio_reset(struct pds_vfio_pci_device *pds_vfio,
+		    enum vfio_device_mig_state state)
 {
-again:
-	spin_lock(&pds_vfio->reset_lock);
-	if (pds_vfio->deferred_reset) {
-		pds_vfio->deferred_reset = false;
-		if (pds_vfio->state == VFIO_DEVICE_STATE_ERROR) {
-			dev_dbg(&pds_vfio->pdev->dev, "Transitioning from VFIO_DEVICE_STATE_ERROR to %s\n",
-				pds_vfio_lm_state(pds_vfio->deferred_reset_state));
-			pds_vfio->state = pds_vfio->deferred_reset_state;
-			pds_vfio_put_restore_file(pds_vfio);
-			pds_vfio_put_save_file(pds_vfio);
-		} else if (pds_vfio->deferred_reset_state == VFIO_DEVICE_STATE_ERROR) {
-			dev_dbg(&pds_vfio->pdev->dev, "Transitioning from %s to VFIO_DEVICE_STATE_ERROR based on deferred_reset request\n",
-				pds_vfio_lm_state(pds_vfio->state));
-			pds_vfio->state = VFIO_DEVICE_STATE_ERROR;
-		}
-		pds_vfio->deferred_reset_state = VFIO_DEVICE_STATE_RUNNING;
-		spin_unlock(&pds_vfio->reset_lock);
-		goto again;
-	}
-	mutex_unlock(&pds_vfio->state_mutex);
-	spin_unlock(&pds_vfio->reset_lock);
+	pds_vfio_put_restore_file(pds_vfio);
+	pds_vfio_put_save_file(pds_vfio);
+	if (state == VFIO_DEVICE_STATE_ERROR)
+		pds_vfio_dirty_disable(pds_vfio, false);
+	pds_vfio->state = state;
 }
 
-void
-pds_vfio_reset(struct pds_vfio_pci_device *pds_vfio)
-{
-	spin_lock(&pds_vfio->reset_lock);
-	pds_vfio->deferred_reset = true;
-	pds_vfio->deferred_reset_state = VFIO_DEVICE_STATE_RUNNING;
-	if (!mutex_trylock(&pds_vfio->state_mutex)) {
-		spin_unlock(&pds_vfio->reset_lock);
-		return;
-	}
-	spin_unlock(&pds_vfio->reset_lock);
-	pds_vfio_state_mutex_unlock(pds_vfio);
-}
-
-void
-pds_vfio_deferred_reset(struct pds_vfio_pci_device *pds_vfio,
-			enum vfio_device_mig_state reset_state)
-{
-	dev_info(&pds_vfio->pdev->dev, "Requesting deferred_reset to state %s\n",
-		 pds_vfio_lm_state(reset_state));
-	spin_lock(&pds_vfio->reset_lock);
-	pds_vfio->deferred_reset = true;
-	pds_vfio->deferred_reset_state = reset_state;
-	spin_unlock(&pds_vfio->reset_lock);
-}
-
-struct file *
+static struct file *
 pds_vfio_set_device_state(struct vfio_device *vdev,
 			  enum vfio_device_mig_state new_state)
 {
 	struct pds_vfio_pci_device *pds_vfio =
 		container_of(vdev, struct pds_vfio_pci_device,
 			     vfio_coredev.vdev);
+	struct pci_dev *pdev = to_pci_dev(vdev->dev);
+	enum vfio_device_mig_state start_state;
 	struct file *res = NULL;
 
-	if (!pds_vfio->vfio_aux)
-		return ERR_PTR(-ENODEV);
-
 	mutex_lock(&pds_vfio->state_mutex);
-	/* only way to transition out of VFIO_DEVICE_STATE_ERROR is via
+
+	start_state = pds_vfio->state;
+	dev_dbg(&pdev->dev, "START: %s => %s\n",
+		pds_vfio_lm_state(start_state),
+		pds_vfio_lm_state(new_state));
+
+	/*
+	 * only way to transition out of VFIO_DEVICE_STATE_ERROR is via
 	 * VFIO_DEVICE_RESET, so prevent the state machine from running since
 	 * vfio_mig_get_next_state() will throw a WARN_ON() when transitioning
 	 * from VFIO_DEVICE_STATE_ERROR to any other state
@@ -109,17 +83,19 @@ pds_vfio_set_device_state(struct vfio_device *vdev,
 			break;
 		}
 	}
-	pds_vfio_state_mutex_unlock(pds_vfio);
-	/* still waiting on a deferred_reset */
+	mutex_unlock(&pds_vfio->state_mutex);
 	if (pds_vfio->state == VFIO_DEVICE_STATE_ERROR)
 		res = ERR_PTR(-EIO);
+
+	dev_dbg(&pdev->dev, "END: %s => %s\n",
+		pds_vfio_lm_state(start_state),
+		pds_vfio_lm_state(new_state));
 
 	return res;
 }
 
-int
-pds_vfio_get_device_state(struct vfio_device *vdev,
-			  enum vfio_device_mig_state *current_state)
+static int pds_vfio_get_device_state(struct vfio_device *vdev,
+				     enum vfio_device_mig_state *current_state)
 {
 	struct pds_vfio_pci_device *pds_vfio =
 		container_of(vdev, struct pds_vfio_pci_device,
@@ -127,61 +103,77 @@ pds_vfio_get_device_state(struct vfio_device *vdev,
 
 	mutex_lock(&pds_vfio->state_mutex);
 	*current_state = pds_vfio->state;
-	pds_vfio_state_mutex_unlock(pds_vfio);
+	mutex_unlock(&pds_vfio->state_mutex);
 	return 0;
 }
 
-static const struct vfio_migration_ops
-pds_vfio_lm_ops = {
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0) )
+static int pds_vfio_get_device_state_size(struct vfio_device *vdev,
+					  unsigned long *stop_copy_length)
+{
+	*stop_copy_length = PDS_LM_DEVICE_STATE_LENGTH;
+	return 0;
+}
+#endif
+
+static const struct vfio_migration_ops pds_vfio_lm_ops = {
 	.migration_set_state = pds_vfio_set_device_state,
-	.migration_get_state = pds_vfio_get_device_state
+	.migration_get_state = pds_vfio_get_device_state,
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0) )
+	.migration_get_data_size = pds_vfio_get_device_state_size
+#endif
 };
 
-static const struct vfio_log_ops
-pds_vfio_log_ops = {
+static const struct vfio_log_ops pds_vfio_log_ops = {
 	.log_start = pds_vfio_dma_logging_start,
 	.log_stop = pds_vfio_dma_logging_stop,
 	.log_read_and_clear = pds_vfio_dma_logging_report,
 };
 
-static int
-pds_vfio_init_device(struct vfio_device *vdev)
+static int pds_vfio_init_device(struct vfio_device *vdev)
 {
 	struct pds_vfio_pci_device *pds_vfio =
 		container_of(vdev, struct pds_vfio_pci_device,
 			     vfio_coredev.vdev);
 	struct pci_dev *pdev = to_pci_dev(vdev->dev);
-	struct pds_vfio_aux *vfio_aux;
-	int err;
+	int err, vf_id, pci_id;
+
+	vf_id = pci_iov_vf_id(pdev);
+	if (vf_id < 0)
+		return vf_id;
 
 	err = vfio_pci_core_init_dev(vdev);
 	if (err)
 		return err;
 
-	pds_vfio->vf_id = pci_iov_vf_id(pdev);
-	pds_vfio->pci_id = PCI_DEVID(pdev->bus->number, pdev->devfn);
-	vfio_aux = pds_vfio_aux_get_drvdata(pds_vfio->pci_id);
-	if (vfio_aux) {
-		vfio_aux->pds_vfio = pds_vfio;
-		pds_vfio->coredev = vfio_aux->padev->aux_dev.dev.parent;
-		pds_vfio->vfio_aux = vfio_aux;
-		pds_vfio_put_aux_dev(vfio_aux);
-	}
+	pds_vfio->vf_id = vf_id;
 
-	vdev->migration_flags = VFIO_MIGRATION_STOP_COPY;
+	mutex_init(&pds_vfio->state_mutex);
+
+	vdev->migration_flags = VFIO_MIGRATION_STOP_COPY | VFIO_MIGRATION_P2P;
 	vdev->mig_ops = &pds_vfio_lm_ops;
 	vdev->log_ops = &pds_vfio_log_ops;
 
-	dev_dbg(&pdev->dev, "%s: PF %#04x VF %#04x (%d) vf_id %d domain %d vfio_aux %p pds_vfio %p\n",
-		__func__, pci_dev_id(pdev->physfn),
-		pds_vfio->pci_id, pds_vfio->pci_id, pds_vfio->vf_id,
-		pci_domain_nr(pdev->bus), pds_vfio->vfio_aux, pds_vfio);
+	pci_id = PCI_DEVID(pdev->bus->number, pdev->devfn);
+	dev_dbg(&pdev->dev,
+		"%s: PF %#04x VF %#04x vf_id %d domain %d pds_vfio %p\n",
+		__func__, pci_dev_id(pdev->physfn), pci_id, vf_id,
+		pci_domain_nr(pdev->bus), pds_vfio);
 
 	return 0;
 }
 
-static int
-pds_vfio_open_device(struct vfio_device *vdev)
+static void pds_vfio_release_device(struct vfio_device *vdev)
+{
+	struct pds_vfio_pci_device *pds_vfio =
+		container_of(vdev, struct pds_vfio_pci_device,
+			     vfio_coredev.vdev);
+
+	mutex_destroy(&pds_vfio->state_mutex);
+	vfio_pci_core_release_dev(vdev);
+}
+
+static int pds_vfio_open_device(struct vfio_device *vdev)
 {
 	struct pds_vfio_pci_device *pds_vfio =
 		container_of(vdev, struct pds_vfio_pci_device,
@@ -192,33 +184,31 @@ pds_vfio_open_device(struct vfio_device *vdev)
 	if (err)
 		return err;
 
-	mutex_init(&pds_vfio->state_mutex);
-	dev_dbg(&pds_vfio->pdev->dev, "%s: %s => VFIO_DEVICE_STATE_RUNNING\n",
-		__func__, pds_vfio_lm_state(pds_vfio->state));
 	pds_vfio->state = VFIO_DEVICE_STATE_RUNNING;
-	pds_vfio->deferred_reset_state = VFIO_DEVICE_STATE_RUNNING;
 
 	vfio_pci_core_finish_enable(&pds_vfio->vfio_coredev);
 
 	return 0;
 }
 
-static void
-pds_vfio_close_device(struct vfio_device *vdev)
+static void pds_vfio_close_device(struct vfio_device *vdev)
 {
 	struct pds_vfio_pci_device *pds_vfio =
 		container_of(vdev, struct pds_vfio_pci_device,
 			     vfio_coredev.vdev);
 
-	mutex_destroy(&pds_vfio->state_mutex);
+	mutex_lock(&pds_vfio->state_mutex);
+	pds_vfio_put_restore_file(pds_vfio);
+	pds_vfio_put_save_file(pds_vfio);
+	pds_vfio_dirty_disable(pds_vfio, true);
+	mutex_unlock(&pds_vfio->state_mutex);
 	vfio_pci_core_close_device(vdev);
 }
 
-static const struct vfio_device_ops
-pds_vfio_ops = {
+static const struct vfio_device_ops pds_vfio_ops = {
 	.name = "pds-vfio",
 	.init = pds_vfio_init_device,
-	.release = vfio_pci_core_release_dev,
+	.release = pds_vfio_release_device,
 	.open_device = pds_vfio_open_device,
 	.close_device = pds_vfio_close_device,
 	.ioctl = vfio_pci_core_ioctl,
@@ -228,10 +218,14 @@ pds_vfio_ops = {
 	.mmap = vfio_pci_core_mmap,
 	.request = vfio_pci_core_request,
 	.match = vfio_pci_core_match,
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0) )
+	.bind_iommufd = vfio_iommufd_physical_bind,
+	.unbind_iommufd = vfio_iommufd_physical_unbind,
+	.attach_ioas = vfio_iommufd_physical_attach_ioas,
+#endif
 };
 
-const struct vfio_device_ops *
-pds_vfio_ops_info(void)
+const struct vfio_device_ops *pds_vfio_ops_info(void)
 {
 	return &pds_vfio_ops;
 }

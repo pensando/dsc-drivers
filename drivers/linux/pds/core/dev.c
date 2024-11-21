@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2022 Pensando Systems, Inc */
+/* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
-#include <linux/version.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/pci.h>
-#include <linux/delay.h>
 #include <linux/utsname.h>
-#include <linux/ctype.h>
 
 #include "core.h"
-
-#define PDS_CASE_STRINGIFY(opcode) case (opcode): return #opcode
 
 int pdsc_err_to_errno(enum pds_core_status_code code)
 {
@@ -49,6 +42,8 @@ int pdsc_err_to_errno(enum pds_core_status_code code)
 		return -ERANGE;
 	case PDS_RC_BAD_ADDR:
 		return -EFAULT;
+	case PDS_RC_BAD_PCI:
+		return -ENXIO;
 	case PDS_RC_EOPCODE:
 	case PDS_RC_EINTR:
 	case PDS_RC_DEV_CMD:
@@ -62,6 +57,9 @@ int pdsc_err_to_errno(enum pds_core_status_code code)
 
 bool pdsc_is_fw_running(struct pdsc *pdsc)
 {
+	if (!pdsc->info_regs)
+		return false;
+
 	pdsc->fw_status = ioread8(&pdsc->info_regs->fw_status);
 	pdsc->last_fw_time = jiffies;
 	pdsc->last_hb = ioread32(&pdsc->info_regs->fw_heartbeat);
@@ -69,14 +67,21 @@ bool pdsc_is_fw_running(struct pdsc *pdsc)
 	/* Firmware is useful only if the running bit is set and
 	 * fw_status != 0xff (bad PCI read)
 	 */
-	return (pdsc->fw_status != 0xff) &&
+	return (pdsc->fw_status != PDS_RC_BAD_PCI) &&
 		(pdsc->fw_status & PDS_CORE_FW_STS_F_RUNNING);
 }
 
 bool pdsc_is_fw_good(struct pdsc *pdsc)
 {
-	return pdsc_is_fw_running(pdsc) &&
-		(pdsc->fw_status & PDS_CORE_FW_STS_F_GENERATION) == pdsc->fw_generation;
+	bool fw_running = pdsc_is_fw_running(pdsc);
+	u8 gen;
+
+	/* Make sure to update the cached fw_status by calling
+	 * pdsc_is_fw_running() before getting the generation
+	 */
+	gen = pdsc->fw_status & PDS_CORE_FW_STS_F_GENERATION;
+
+	return fw_running && gen == pdsc->fw_generation;
 }
 
 static u8 pdsc_devcmd_status(struct pdsc *pdsc)
@@ -100,40 +105,47 @@ static void pdsc_devcmd_clean(struct pdsc *pdsc)
 	iowrite32(0, &pdsc->cmd_regs->doorbell);
 	memset_io(&pdsc->cmd_regs->cmd, 0, sizeof(pdsc->cmd_regs->cmd));
 }
+
 static const char *pdsc_devcmd_str(int opcode)
 {
 	switch (opcode) {
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_NOP);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_IDENTIFY);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_RESET);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_INIT);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_FW_DOWNLOAD);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_FW_CONTROL);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_VF_GETATTR);
-	PDS_CASE_STRINGIFY(PDS_CORE_CMD_VF_SETATTR);
+	case PDS_CORE_CMD_NOP:
+		return "PDS_CORE_CMD_NOP";
+	case PDS_CORE_CMD_IDENTIFY:
+		return "PDS_CORE_CMD_IDENTIFY";
+	case PDS_CORE_CMD_RESET:
+		return "PDS_CORE_CMD_RESET";
+	case PDS_CORE_CMD_INIT:
+		return "PDS_CORE_CMD_INIT";
+	case PDS_CORE_CMD_FW_DOWNLOAD:
+		return "PDS_CORE_CMD_FW_DOWNLOAD";
+	case PDS_CORE_CMD_FW_CONTROL:
+		return "PDS_CORE_CMD_FW_CONTROL";
 	default:
 		return "PDS_CORE_CMD_UNKNOWN";
 	}
 }
 
-static int pdsc_devcmd_wait(struct pdsc *pdsc, int max_seconds)
+static int pdsc_devcmd_wait(struct pdsc *pdsc, u8 opcode, int max_seconds)
 {
 	struct device *dev = pdsc->dev;
 	unsigned long start_time;
 	unsigned long max_wait;
 	unsigned long duration;
 	int timeout = 0;
-	int status = 0;
+	bool running;
 	int done = 0;
 	int err = 0;
-	int opcode;
-
-	opcode = ioread8(&pdsc->cmd_regs->cmd.opcode);
+	int status;
 
 	start_time = jiffies;
 	max_wait = start_time + (max_seconds * HZ);
 
 	while (!done && !timeout) {
+		running = pdsc_is_fw_running(pdsc);
+		if (!running)
+			break;
+
 		done = pdsc_devcmd_done(pdsc);
 		if (done)
 			break;
@@ -150,7 +162,7 @@ static int pdsc_devcmd_wait(struct pdsc *pdsc, int max_seconds)
 		dev_dbg(dev, "DEVCMD %d %s after %ld secs\n",
 			opcode, pdsc_devcmd_str(opcode), duration / HZ);
 
-	if (!done || timeout) {
+	if ((!done || timeout) && running) {
 		dev_err(dev, "DEVCMD %d %s timeout, done %d timeout %d max_seconds=%d\n",
 			opcode, pdsc_devcmd_str(opcode), done, timeout,
 			max_seconds);
@@ -160,7 +172,7 @@ static int pdsc_devcmd_wait(struct pdsc *pdsc, int max_seconds)
 
 	status = pdsc_devcmd_status(pdsc);
 	err = pdsc_err_to_errno(status);
-	if (status != PDS_RC_SUCCESS && status != PDS_RC_EAGAIN)
+	if (err && err != -EAGAIN)
 		dev_err(dev, "DEVCMD %d %s failed, status=%d err %d %pe\n",
 			opcode, pdsc_devcmd_str(opcode), status, err,
 			ERR_PTR(err));
@@ -173,13 +185,17 @@ int pdsc_devcmd_locked(struct pdsc *pdsc, union pds_core_dev_cmd *cmd,
 {
 	int err;
 
+	if (!pdsc->cmd_regs)
+		return -ENXIO;
+
 	memcpy_toio(&pdsc->cmd_regs->cmd, cmd, sizeof(*cmd));
 	pdsc_devcmd_dbell(pdsc);
-	err = pdsc_devcmd_wait(pdsc, max_seconds);
-	memcpy_fromio(comp, &pdsc->cmd_regs->comp, sizeof(*comp));
+	err = pdsc_devcmd_wait(pdsc, cmd->opcode, max_seconds);
 
-	if (err == -ENXIO || err == -ETIMEDOUT)
-		pdsc_queue_health_check(pdsc);
+	if ((err == -ENXIO || err == -ETIMEDOUT) && pdsc->wq)
+		queue_work(pdsc->wq, &pdsc->health_work);
+	else
+		memcpy_fromio(comp, &pdsc->cmd_regs->comp, sizeof(*comp));
 
 	return err;
 }
@@ -198,7 +214,7 @@ int pdsc_devcmd(struct pdsc *pdsc, union pds_core_dev_cmd *cmd,
 
 int pdsc_devcmd_init(struct pdsc *pdsc)
 {
-	union pds_core_dev_comp comp = { 0 };
+	union pds_core_dev_comp comp = {};
 	union pds_core_dev_cmd cmd = {
 		.opcode = PDS_CORE_CMD_INIT,
 	};
@@ -208,87 +224,43 @@ int pdsc_devcmd_init(struct pdsc *pdsc)
 
 int pdsc_devcmd_reset(struct pdsc *pdsc)
 {
-	union pds_core_dev_comp comp = { 0 };
+	union pds_core_dev_comp comp = {};
 	union pds_core_dev_cmd cmd = {
 		.reset.opcode = PDS_CORE_CMD_RESET,
 	};
+
+	if (!pdsc_is_fw_running(pdsc))
+		return 0;
 
 	return pdsc_devcmd(pdsc, &cmd, &comp, pdsc->devcmd_timeout);
 }
 
 static int pdsc_devcmd_identify_locked(struct pdsc *pdsc)
 {
-	union pds_core_dev_comp comp = { 0 };
+	union pds_core_dev_comp comp = {};
 	union pds_core_dev_cmd cmd = {
 		.identify.opcode = PDS_CORE_CMD_IDENTIFY,
-//  TODO		.identify.ver = PDS_CORE_IDENTITY_VERSION_2,
 		.identify.ver = PDS_CORE_IDENTITY_VERSION_1,
 	};
 
 	return pdsc_devcmd_locked(pdsc, &cmd, &comp, pdsc->devcmd_timeout);
 }
 
-int pdsc_dev_cmd_vf_getattr(struct pdsc *pdsc, int vf, u8 attr,
-			    struct pds_core_vf_getattr_comp *comp)
-{
-	union pds_core_dev_cmd cmd = {
-		.vf_getattr.opcode = PDS_CORE_CMD_VF_GETATTR,
-		.vf_getattr.attr = attr,
-		.vf_getattr.vf_index = cpu_to_le16(vf),
-	};
-	int err;
-
-	if (vf >= pdsc->num_vfs)
-		return -ENODEV;
-
-	switch (attr) {
-	case PDS_CORE_VF_ATTR_SPOOFCHK:
-	case PDS_CORE_VF_ATTR_TRUST:
-	case PDS_CORE_VF_ATTR_LINKSTATE:
-	case PDS_CORE_VF_ATTR_MAC:
-	case PDS_CORE_VF_ATTR_VLAN:
-	case PDS_CORE_VF_ATTR_RATE:
-		break;
-	case PDS_CORE_VF_ATTR_STATSADDR:
-	default:
-		return -EINVAL;
-	}
-
-	err = pdsc_devcmd(pdsc, &cmd,
-			  (union pds_core_dev_comp *)comp,
-			  pdsc->devcmd_timeout);
-
-	return err;
-}
-
-int pds_devcmd_vf_start(struct pdsc *pdsc)
-{
-	union pds_core_dev_comp comp = { 0 };
-	union pds_core_dev_cmd cmd = {
-		.vf_ctrl.opcode = PDS_CORE_CMD_VF_CTRL,
-		.vf_ctrl.ctrl_opcode = PDS_CORE_VF_CTRL_START_ALL,
-	};
-	int err;
-
-	err = pdsc_devcmd(pdsc, &cmd, &comp, pdsc->devcmd_timeout);
-
-	return err;
-}
-
 static void pdsc_init_devinfo(struct pdsc *pdsc)
 {
 	pdsc->dev_info.asic_type = ioread8(&pdsc->info_regs->asic_type);
 	pdsc->dev_info.asic_rev = ioread8(&pdsc->info_regs->asic_rev);
+	pdsc->fw_generation = PDS_CORE_FW_STS_F_GENERATION &
+			      ioread8(&pdsc->info_regs->fw_status);
 
 	memcpy_fromio(pdsc->dev_info.fw_version,
 		      pdsc->info_regs->fw_version,
 		      PDS_CORE_DEVINFO_FWVERS_BUFLEN);
+	pdsc->dev_info.fw_version[PDS_CORE_DEVINFO_FWVERS_BUFLEN] = 0;
 
 	memcpy_fromio(pdsc->dev_info.serial_num,
 		      pdsc->info_regs->serial_num,
 		      PDS_CORE_DEVINFO_SERIAL_BUFLEN);
-
-	pdsc->dev_info.fw_version[PDS_CORE_DEVINFO_FWVERS_BUFLEN] = 0;
 	pdsc->dev_info.serial_num[PDS_CORE_DEVINFO_SERIAL_BUFLEN] = 0;
 
 	dev_dbg(pdsc->dev, "fw_version %s\n", pdsc->dev_info.fw_version);
@@ -296,16 +268,17 @@ static void pdsc_init_devinfo(struct pdsc *pdsc)
 
 static int pdsc_identify(struct pdsc *pdsc)
 {
-	struct pds_core_drv_identity drv = { 0 };
+	struct pds_core_drv_identity drv = {};
 	size_t sz;
 	int err;
+	int n;
 
 	drv.drv_type = cpu_to_le32(PDS_DRIVER_LINUX);
-	drv.kernel_ver = cpu_to_le32(LINUX_VERSION_CODE);
-	snprintf(drv.kernel_ver_str, sizeof(drv.kernel_ver_str),
-		 "%s %s", utsname()->release, utsname()->version);
-	snprintf(drv.driver_ver_str, sizeof(drv.driver_ver_str),
-		 "%s %s", PDS_CORE_DRV_NAME, utsname()->release);
+	/* Catching the return quiets a Wformat-truncation complaint */
+	n = snprintf(drv.driver_ver_str, sizeof(drv.driver_ver_str),
+		     "%s %s", PDS_CORE_DRV_NAME, utsname()->release);
+	if (n > sizeof(drv.driver_ver_str))
+		dev_dbg(pdsc->dev, "release name truncated, don't care\n");
 
 	/* Next let's get some info about the device
 	 * We use the devcmd_lock at this level in order to
@@ -319,13 +292,15 @@ static int pdsc_identify(struct pdsc *pdsc)
 
 	err = pdsc_devcmd_identify_locked(pdsc);
 	if (!err) {
-		sz = min_t(size_t, sizeof(pdsc->dev_ident), sizeof(pdsc->cmd_regs->data));
+		sz = min_t(size_t, sizeof(pdsc->dev_ident),
+			   sizeof(pdsc->cmd_regs->data));
 		memcpy_fromio(&pdsc->dev_ident, &pdsc->cmd_regs->data, sz);
 	}
 	mutex_unlock(&pdsc->devcmd_lock);
 
 	if (err) {
-		dev_err(pdsc->dev, "Cannot identify device: %pe\n", ERR_PTR(err));
+		dev_err(pdsc->dev, "Cannot identify device: %pe\n",
+			ERR_PTR(err));
 		return err;
 	}
 
@@ -344,11 +319,20 @@ static int pdsc_identify(struct pdsc *pdsc)
 	return 0;
 }
 
-int pdsc_dev_reinit(struct pdsc *pdsc)
+void pdsc_dev_uninit(struct pdsc *pdsc)
 {
-	pdsc_init_devinfo(pdsc);
+	if (pdsc->intr_info) {
+		int i;
 
-	return pdsc_identify(pdsc);
+		for (i = 0; i < pdsc->nintrs; i++)
+			pdsc_intr_free(pdsc, i);
+
+		kfree(pdsc->intr_info);
+		pdsc->intr_info = NULL;
+		pdsc->nintrs = 0;
+	}
+
+	pci_free_irq_vectors(pdsc->pdev);
 }
 
 int pdsc_dev_init(struct pdsc *pdsc)
@@ -372,18 +356,12 @@ int pdsc_dev_init(struct pdsc *pdsc)
 
 	/* Now we can reserve interrupts */
 	nintrs = le32_to_cpu(pdsc->dev_ident.nintrs);
-
-	// TODO: how many interrupts should we grab?
-	//       for now just wing it with cpu count
 	nintrs = min_t(unsigned int, num_online_cpus(), nintrs);
 
 	/* Get intr_info struct array for tracking */
-	pdsc->intr_info = devm_kcalloc(pdsc->dev, nintrs,
-				       sizeof(*pdsc->intr_info), GFP_KERNEL);
-	if (!pdsc->intr_info) {
-		err = -ENOSPC;
-		goto err_out;
-	}
+	pdsc->intr_info = kcalloc(nintrs, sizeof(*pdsc->intr_info), GFP_KERNEL);
+	if (!pdsc->intr_info)
+		return -ENOMEM;
 
 	err = pci_alloc_irq_vectors(pdsc->pdev, nintrs, nintrs, PCI_IRQ_MSIX);
 	if (err != nintrs) {
@@ -393,14 +371,12 @@ int pdsc_dev_init(struct pdsc *pdsc)
 		goto err_out;
 	}
 	pdsc->nintrs = nintrs;
-	pdsc_debugfs_add_irqs(pdsc);
 
 	return 0;
 
 err_out:
-	if (pdsc->intr_info) {
-		devm_kfree(pdsc->dev, pdsc->intr_info);
-		pdsc->intr_info = NULL;
-	}
+	kfree(pdsc->intr_info);
+	pdsc->intr_info = NULL;
+
 	return err;
 }

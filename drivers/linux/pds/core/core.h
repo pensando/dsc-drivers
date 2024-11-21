@@ -1,31 +1,51 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2022 Pensando Systems, Inc */
+/* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
 #ifndef _PDSC_H_
 #define _PDSC_H_
 
+#include <linux/ctype.h>
 #include <linux/debugfs.h>
-#include <linux/workqueue.h>
-#include <linux/timer.h>
 #include <net/devlink.h>
 
-#include "pds_common.h"
-#include "pds_core_if.h"
-#include "pds_adminq.h"
-#include "pds_intr.h"
+#include <linux/pds/pds_common.h>
+#include <linux/pds/pds_core_if.h>
+#include <linux/pds/pds_adminq.h>
+#include <linux/pds/pds_intr.h>
 
-#define PDSC_DRV_DESCRIPTION	"Pensando Core PF Driver"
+#include <linux/version.h>
+/* TODO: Remove this mess when we move up to Linux v6.3 and
+ * can remove the ifdef's for devl_register and friends.
+ * The devl_* APIs are what we are using in the upstream code.
+ */
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+#define HAVE_DEVL_API
+#endif
+
+/* TODO: Remove this mess when all users move to Linux v6.2,
+ * which is where timer_shutdown_sync() was first included.
+ */
+#if (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
+static inline void timer_shutdown_sync(struct timer_list *timer)
+{
+	del_timer_sync(timer);
+}
+#endif
+
+#if (KERNEL_VERSION(6, 9, 0) < LINUX_VERSION_CODE)
+#define HAVE_DEVLINK_EXTRACT_PARAM
+#endif
+
+#define PDSC_DRV_DESCRIPTION	"AMD/Pensando Core Driver"
 
 #define PDSC_WATCHDOG_SECS	5
-#define PDSC_QUEUE_NAME_MAX_SZ  32
+#define PDSC_QUEUE_NAME_MAX_SZ  16
 #define PDSC_ADMINQ_MIN_LENGTH	16	/* must be a power of two */
 #define PDSC_NOTIFYQ_LENGTH	64	/* must be a power of two */
-#define PDSC_ADMINQ_MAX_POLL_INTERVAL	256
-#define PDSC_TEARDOWN_RECOVERY  false
-#define PDSC_TEARDOWN_REMOVING  true
-#define PDSC_SETUP_RECOVERY		false
-#define PDSC_SETUP_INIT			true
-
+#define PDSC_TEARDOWN_RECOVERY	false
+#define PDSC_TEARDOWN_REMOVING	true
+#define PDSC_SETUP_RECOVERY	false
+#define PDSC_SETUP_INIT		true
 
 struct pdsc_dev_bar {
 	void __iomem *vaddr;
@@ -34,20 +54,13 @@ struct pdsc_dev_bar {
 	int res_index;
 };
 
+struct pdsc;
+
 struct pdsc_vf {
-	u16     index;
-	u8      macaddr[6];
-	__le32  maxrate;
-	__le16  vlanid;
-	u8      spoofchk;
-	u8      trusted;
-	u8      linkstate;
-	__le16  vif_types[PDS_DEV_TYPE_MAX];
-
-	struct pds_core_vf_stats stats;
-	dma_addr_t               stats_pa;
-
 	struct pds_auxiliary_dev *padev;
+	struct pdsc *vf;
+	u16     index;
+	__le16  vif_types[PDS_DEV_TYPE_MAX];
 };
 
 struct pdsc_devinfo {
@@ -86,7 +99,6 @@ struct pdsc_intr_info {
 	unsigned int index;
 	unsigned int vector;
 	void *data;
-	u16 client_id;
 };
 
 struct pdsc_cq_info {
@@ -108,8 +120,7 @@ struct pdsc_q_info {
 	unsigned int bytes;
 	unsigned int nbufs;
 	struct pdsc_buf_info bufs[PDS_CORE_MAX_FRAGS];
-	pds_core_cb cb;
-	void *cb_arg;
+	struct pdsc_wait_context *wc;
 	void *dest;
 };
 
@@ -134,7 +145,6 @@ struct pdsc_qcq {
 	u32 q_size;
 	u32 cq_size;
 	bool armed;
-	u16 client_id;
 	unsigned int flags;
 
 	struct work_struct work;
@@ -148,24 +158,16 @@ struct pdsc_qcq {
 
 struct pdsc_viftype {
 	char *name;
-	u16 max_devs;
+	bool supported;
 	bool enabled;
 	int dl_id;
-	bool is_pf;
 	int vif_id;
 	struct pds_auxiliary_dev *padev;
 };
 
-enum pdsc_devlink_param_id {
-	PDSC_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
-	PDSC_DEVLINK_PARAM_ID_CORE,
-	PDSC_DEVLINK_PARAM_ID_LM,
-	PDSC_DEVLINK_PARAM_ID_FW_BOOT,
-};
-
 /* No state flags set means we are in a steady running state */
 enum pdsc_state_flags {
-	PDSC_S_FW_DEAD,		    /* fw stopped, waiting for startup or recovery */
+	PDSC_S_FW_DEAD,		    /* stopped, wait on startup or recovery */
 	PDSC_S_INITING_DRIVER,	    /* initial startup from probe */
 	PDSC_S_STOPPING_DRIVER,	    /* driver remove */
 
@@ -178,11 +180,11 @@ struct pdsc {
 	struct dentry *dentry;
 	struct device *dev;
 	struct pdsc_dev_bar bars[PDS_CORE_BARS_MAX];
-	unsigned int num_bars;
 	struct pdsc_vf *vfs;
 	int num_vfs;
+	int vf_id;
 	int hw_index;
-	int id;
+	int uid;
 
 	unsigned long state;
 	u8 fw_status;
@@ -192,6 +194,8 @@ struct pdsc {
 	struct timer_list wdtimer;
 	unsigned int wdtimer_period;
 	struct work_struct health_work;
+	struct devlink_health_reporter *fw_reporter;
+	u32 fw_recoveries;
 
 	struct pdsc_devinfo dev_info;
 	struct pds_core_dev_identity dev_ident;
@@ -199,13 +203,12 @@ struct pdsc {
 	struct pdsc_intr_info *intr_info;	/* array of nintrs elements */
 
 	struct workqueue_struct *wq;
-	struct net_device *netdev;
-	struct rw_semaphore vf_op_lock;	/* lock for VF operations */
 
 	unsigned int devcmd_timeout;
 	struct mutex devcmd_lock;	/* lock for dev_cmd operations */
 	struct mutex config_lock;	/* lock for configuration operations */
 	spinlock_t adminq_lock;		/* lock for adminq operations */
+	refcount_t adminq_refcnt;
 	struct pds_core_dev_info_regs __iomem *info_regs;
 	struct pds_core_dev_cmd_regs __iomem *cmd_regs;
 	struct pds_core_intr __iomem *intr_ctrl;
@@ -214,11 +217,11 @@ struct pdsc {
 	dma_addr_t phy_db_pages;
 	u64 __iomem *kern_dbpage;
 
-	unsigned int nadminq;
-	struct pdsc_qcq *adminqcq;	/* array of nadminq elements */
+	struct pdsc_qcq adminqcq;
 	struct pdsc_qcq notifyqcq;
 	u64 last_eid;
 	struct pdsc_viftype *viftype_status;
+	struct work_struct pci_reset_work;
 };
 
 /** enum pds_core_dbell_bits - bitwise composition of dbell values.
@@ -229,12 +232,12 @@ struct pdsc {
  *
  * @PDS_CORE_DBELL_RING_MASK:	unshifted mask of valid ring bits.
  * @PDS_CORE_DBELL_RING_SHIFT:	ring shift amount in dbell value.
- * @PDS_CORE_DBELL_RING:		macro to build ring component of dbell value.
+ * @PDS_CORE_DBELL_RING:	macro to build ring component of dbell value.
  *
- * @PDS_CORE_DBELL_RING_0:		ring zero dbell component value.
- * @PDS_CORE_DBELL_RING_1:		ring one dbell component value.
- * @PDS_CORE_DBELL_RING_2:		ring two dbell component value.
- * @PDS_CORE_DBELL_RING_3:		ring three dbell component value.
+ * @PDS_CORE_DBELL_RING_0:	ring zero dbell component value.
+ * @PDS_CORE_DBELL_RING_1:	ring one dbell component value.
+ * @PDS_CORE_DBELL_RING_2:	ring two dbell component value.
+ * @PDS_CORE_DBELL_RING_3:	ring three dbell component value.
  *
  * @PDS_CORE_DBELL_INDEX_MASK:	bit mask of valid index bits, no shift needed.
  */
@@ -260,22 +263,36 @@ enum pds_core_dbell_bits {
 };
 
 static inline void pds_core_dbell_ring(u64 __iomem *db_page,
-				   enum pds_core_logical_qtype qtype,
-				   u64 val)
+				       enum pds_core_logical_qtype qtype,
+				       u64 val)
 {
 	writeq(val, &db_page[qtype]);
 }
 
-void pdsc_queue_health_check(struct pdsc *pdsc);
+int pdsc_fw_reporter_diagnose(struct devlink_health_reporter *reporter,
+			      struct devlink_fmsg *fmsg,
+			      struct netlink_ext_ack *extack);
+int pdsc_dl_info_get(struct devlink *dl, struct devlink_info_req *req,
+		     struct netlink_ext_ack *extack);
+int pdsc_dl_flash_update(struct devlink *dl,
+			 struct devlink_flash_update_params *params,
+			 struct netlink_ext_ack *extack);
+int pdsc_dl_enable_get(struct devlink *dl, u32 id,
+		       struct devlink_param_gset_ctx *ctx);
+#ifdef HAVE_DEVLINK_EXTRACT_PARAM
+int pdsc_dl_enable_set(struct devlink *dl, u32 id,
+		       struct devlink_param_gset_ctx *ctx,
+		       struct netlink_ext_ack *extack);
+#else
+int pdsc_dl_enable_set(struct devlink *dl, u32 id,
+		       struct devlink_param_gset_ctx *ctx);
+#endif
+int pdsc_dl_enable_validate(struct devlink *dl, u32 id,
+			    union devlink_param_value val,
+			    struct netlink_ext_ack *extack);
+
 void __iomem *pdsc_map_dbpage(struct pdsc *pdsc, int page_num);
 
-struct pdsc *pdsc_dl_alloc(struct device *dev);
-void pdsc_dl_free(struct pdsc *pdsc);
-int pdsc_dl_register(struct pdsc *pdsc);
-void pdsc_dl_unregister(struct pdsc *pdsc);
-int pdsc_dl_vif_add(struct pdsc *pdsc, enum pds_core_vif_types vt, const char *name);
-
-#ifdef CONFIG_DEBUG_FS
 void pdsc_debugfs_create(void);
 void pdsc_debugfs_destroy(void);
 void pdsc_debugfs_add_dev(struct pdsc *pdsc);
@@ -285,17 +302,6 @@ void pdsc_debugfs_add_viftype(struct pdsc *pdsc);
 void pdsc_debugfs_add_irqs(struct pdsc *pdsc);
 void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq);
 void pdsc_debugfs_del_qcq(struct pdsc_qcq *qcq);
-#else
-static inline void pdsc_debugfs_create(void) { }
-static inline void pdsc_debugfs_destroy(void) { }
-static inline void pdsc_debugfs_add_dev(struct pdsc *pdsc) { }
-static inline void pdsc_debugfs_del_dev(struct pdsc *pdsc) { }
-static inline void pdsc_debugfs_add_ident(struct pdsc *pdsc) { }
-static inline void pdsc_debugfs_add_viftype(struct pdsc *pdsc) { }
-static inline void pdsc_debugfs_add_irqs(struct pdsc *pdsc) { }
-static inline void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq) { }
-static inline void pdsc_debugfs_del_qcq(struct pdsc_qcq *qcq) { }
-#endif
 
 int pdsc_err_to_errno(enum pds_core_status_code code);
 bool pdsc_is_fw_running(struct pdsc *pdsc);
@@ -304,44 +310,30 @@ int pdsc_devcmd(struct pdsc *pdsc, union pds_core_dev_cmd *cmd,
 		union pds_core_dev_comp *comp, int max_seconds);
 int pdsc_devcmd_locked(struct pdsc *pdsc, union pds_core_dev_cmd *cmd,
 		       union pds_core_dev_comp *comp, int max_seconds);
-int pdsc_dev_cmd_vf_getattr(struct pdsc *pdsc, int vf, u8 attr,
-			    struct pds_core_vf_getattr_comp *comp);
 int pdsc_devcmd_init(struct pdsc *pdsc);
 int pdsc_devcmd_reset(struct pdsc *pdsc);
-int pds_devcmd_vf_start(struct pdsc *pdsc);
-int pdsc_dev_reinit(struct pdsc *pdsc);
 int pdsc_dev_init(struct pdsc *pdsc);
-int pdsc_adminq_post_async(struct pdsc *pdsc, struct pdsc_qcq *qcq,
-			   union pds_core_adminq_cmd *cmd,
-			   union pds_core_adminq_comp *comp,
-			   void (*comp_cb)(void *cb_arg), void *data);
-int pdsc_adminq_post(struct pdsc *pdsc, struct pdsc_qcq *qcq,
-		     union pds_core_adminq_cmd *cmd,
-		     union pds_core_adminq_comp *comp,
-		     bool fast_poll);
+void pdsc_dev_uninit(struct pdsc *pdsc);
 
-void pdsc_health_thread(struct work_struct *work);
-int pdsc_intr_alloc(struct pdsc *pdsc, char *name, u16 client_id,
+int pdsc_intr_alloc(struct pdsc *pdsc, char *name,
 		    irq_handler_t handler, void *data);
 void pdsc_intr_free(struct pdsc *pdsc, int index);
-void pdsc_qcq_free(struct pdsc *pdsc, struct pdsc_qcq *qcq, bool clear_client);
+void pdsc_qcq_free(struct pdsc *pdsc, struct pdsc_qcq *qcq);
 int pdsc_qcq_alloc(struct pdsc *pdsc, unsigned int type, unsigned int index,
 		   const char *name, unsigned int flags, unsigned int num_descs,
 		   unsigned int desc_size, unsigned int cq_desc_size,
 		   unsigned int pid, struct pdsc_qcq *qcq);
 int pdsc_setup(struct pdsc *pdsc, bool init);
-void pdsc_teardown(struct pdsc *pdsc, bool clear_client, bool removing);
+void pdsc_teardown(struct pdsc *pdsc, bool removing);
 int pdsc_start(struct pdsc *pdsc);
 void pdsc_stop(struct pdsc *pdsc);
 void pdsc_health_thread(struct work_struct *work);
 
-#define PDSC_ALL_CLIENT_IDS   0xffff
-int pdsc_auxbus_publish(struct pdsc *pdsc, u16 client_id,
-			union pds_core_notifyq_comp *event);
-int pdsc_auxbus_dev_add_pf_device(struct pdsc *pdsc, enum pds_core_vif_types vt);
-int pdsc_auxbus_dev_del_pf_device(struct pdsc *pdsc, enum pds_core_vif_types vt);
-int pdsc_auxbus_dev_add_vf(struct pdsc *pdsc, int vf_id);
-int pdsc_auxbus_dev_del_vf(struct pdsc *pdsc, int vf_id);
+int pdsc_register_notify(struct notifier_block *nb);
+void pdsc_unregister_notify(struct notifier_block *nb);
+void pdsc_notify(unsigned long event, void *data);
+int pdsc_auxbus_dev_add(struct pdsc *cf, struct pdsc *pf);
+int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf);
 
 void pdsc_process_adminq(struct pdsc_qcq *qcq);
 void pdsc_work_thread(struct work_struct *work);
@@ -350,9 +342,8 @@ irqreturn_t pdsc_adminq_isr(int irq, void *data);
 int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
 			 struct netlink_ext_ack *extack);
 
-int pdsc_init_netdev(struct pdsc *pdsc);
-int pdsc_set_vf_config(struct pdsc *pdsc, int vf,
-			struct pds_core_vf_setattr_cmd *vfc);
-void pdsc_vf_attr_replay(struct pdsc *pdsc);
+void pdsc_fw_down(struct pdsc *pdsc);
+void pdsc_fw_up(struct pdsc *pdsc);
+void pdsc_pci_reset_thread(struct work_struct *work);
 
 #endif /* _PDSC_H_ */

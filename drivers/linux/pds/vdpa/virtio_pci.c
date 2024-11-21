@@ -5,9 +5,9 @@
  */
 
 #include <linux/virtio_pci_modern.h>
-#include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/delay.h>
+
+#include "virtio_pci.h"
 
 /*
  * pds_vdpa_map_capability - map a part of virtio pci capability
@@ -24,8 +24,8 @@
  */
 static void __iomem *
 pds_vdpa_map_capability(struct virtio_pci_modern_device *mdev, int off,
-			 size_t minlen, u32 align, u32 start, u32 size,
-			 size_t *len, resource_size_t *pa)
+			size_t minlen, u32 align, u32 start, u32 size,
+			size_t *len, resource_size_t *pa)
 {
 	struct pci_dev *dev = mdev->pci_dev;
 	u8 bar;
@@ -36,7 +36,7 @@ pds_vdpa_map_capability(struct virtio_pci_modern_device *mdev, int off,
 						 bar),
 			     &bar);
 	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, offset),
-			     &offset);
+			      &offset);
 	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, length),
 			      &length);
 
@@ -198,14 +198,14 @@ int pds_vdpa_probe_virtio(struct virtio_pci_modern_device *mdev)
 
 	err = -EINVAL;
 	mdev->common = pds_vdpa_map_capability(mdev, common,
-				      sizeof(struct virtio_pci_common_cfg), 4,
-				      0, sizeof(struct virtio_pci_common_cfg),
-				      NULL, NULL);
+					       sizeof(struct virtio_pci_common_cfg),
+					       4, 0,
+					       sizeof(struct virtio_pci_common_cfg),
+					       NULL, NULL);
 	if (!mdev->common)
 		goto err_map_common;
 	mdev->isr = pds_vdpa_map_capability(mdev, isr, sizeof(u8), 1,
-					     0, 1,
-					     NULL, NULL);
+					    0, 1, NULL, NULL);
 	if (!mdev->isr)
 		goto err_map_isr;
 
@@ -231,10 +231,10 @@ int pds_vdpa_probe_virtio(struct virtio_pci_modern_device *mdev)
 	 */
 	if ((u64)notify_length + (notify_offset % PAGE_SIZE) <= PAGE_SIZE) {
 		mdev->notify_base = pds_vdpa_map_capability(mdev, notify,
-							     2, 2,
-							     0, notify_length,
-							     &mdev->notify_len,
-							     &mdev->notify_pa);
+							    2, 2,
+							    0, notify_length,
+							    &mdev->notify_len,
+							    &mdev->notify_pa);
 		if (!mdev->notify_base)
 			goto err_map_notify;
 	} else {
@@ -246,9 +246,9 @@ int pds_vdpa_probe_virtio(struct virtio_pci_modern_device *mdev)
 	 */
 	if (device) {
 		mdev->device = pds_vdpa_map_capability(mdev, device, 0, 4,
-							0, PAGE_SIZE,
-							&mdev->device_len,
-							NULL);
+						       0, PAGE_SIZE,
+						       &mdev->device_len,
+						       NULL);
 		if (!mdev->device)
 			goto err_map_device;
 	}
@@ -279,4 +279,3 @@ void pds_vdpa_remove_virtio(struct virtio_pci_modern_device *mdev)
 	pci_iounmap(pci_dev, mdev->common);
 	pci_release_selected_regions(pci_dev, mdev->modern_bars);
 }
-

@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2022 Pensando Systems, Inc */
+/* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
-#include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/errno.h>
-#include <linux/pci.h>
+#include <linux/dynamic_debug.h>
 
 #include "core.h"
-#include "pds_adminq.h"
-
 
 struct pdsc_wait_context {
 	struct pdsc_qcq *qcq;
@@ -21,7 +16,7 @@ static int pdsc_process_notifyq(struct pdsc_qcq *qcq)
 	struct pdsc *pdsc = qcq->pdsc;
 	struct pdsc_cq *cq = &qcq->cq;
 	struct pdsc_cq_info *cq_info;
-	int n_work = 0;
+	int nq_work = 0;
 	u64 eid;
 
 	cq_info = &cq->info[cq->tail_idx];
@@ -34,36 +29,19 @@ static int pdsc_process_notifyq(struct pdsc_qcq *qcq)
 		case PDS_EVENT_LINK_CHANGE:
 			dev_info(pdsc->dev, "NotifyQ LINK_CHANGE ecode %d eid %lld\n",
 				 ecode, eid);
+			pdsc_notify(PDS_EVENT_LINK_CHANGE, comp);
 			break;
 
 		case PDS_EVENT_RESET:
 			dev_info(pdsc->dev, "NotifyQ RESET ecode %d eid %lld\n",
 				 ecode, eid);
-			pdsc_auxbus_publish(pdsc, PDSC_ALL_CLIENT_IDS, comp);
-			// TODO: call fw_down here or not?
-			//	 don't want to race with health check
-			//pdsc_fw_down(pdsc);
+			pdsc_notify(PDS_EVENT_RESET, comp);
 			break;
 
 		case PDS_EVENT_XCVR:
 			dev_info(pdsc->dev, "NotifyQ XCVR ecode %d eid %lld\n",
 				 ecode, eid);
 			break;
-
-		case PDS_EVENT_CLIENT:
-		{
-			struct pds_core_client_event *ce;
-			union pds_core_notifyq_comp *cc;
-			u16 client_id;
-
-			ce = (struct pds_core_client_event *)comp;
-			cc = (union pds_core_notifyq_comp *)&ce->client_event;
-			client_id = le16_to_cpu(ce->client_id);
-			dev_info(pdsc->dev, "NotifyQ CLIENT %d ecode %d eid %lld cc->ecode %d\n",
-				 client_id, ecode, eid, le16_to_cpu(cc->ecode));
-			pdsc_auxbus_publish(pdsc, client_id, cc);
-			break;
-		}
 
 		default:
 			dev_info(pdsc->dev, "NotifyQ ecode %d eid %lld\n",
@@ -77,12 +55,21 @@ static int pdsc_process_notifyq(struct pdsc_qcq *qcq)
 		comp = cq_info->comp;
 		eid = le64_to_cpu(comp->event.eid);
 
-		n_work++;
+		nq_work++;
 	}
 
-	qcq->accum_work += n_work;
+	qcq->accum_work += nq_work;
 
-	return n_work;
+	return nq_work;
+}
+
+static bool pdsc_adminq_inc_if_up(struct pdsc *pdsc)
+{
+	if (pdsc->state & BIT_ULL(PDSC_S_STOPPING_DRIVER) ||
+	    pdsc->state & BIT_ULL(PDSC_S_FW_DEAD))
+		return false;
+
+	return refcount_inc_not_zero(&pdsc->adminq_refcnt);
 }
 
 void pdsc_process_adminq(struct pdsc_qcq *qcq)
@@ -93,16 +80,18 @@ void pdsc_process_adminq(struct pdsc_qcq *qcq)
 	struct pdsc_cq *cq = &qcq->cq;
 	struct pdsc_q_info *q_info;
 	unsigned long irqflags;
-	int n_work = 0;
-	int a_work = 0;
-	pds_core_cb cb;
-	void *cb_arg;
-	int credits;
-	u32 index;
+	int nq_work = 0;
+	int aq_work = 0;
 
-	/* Only the core AdminQ has an accompanying NotifyQ */
-	if (qcq->flags & PDS_CORE_QCQ_F_CORE)
-		n_work = pdsc_process_notifyq(&pdsc->notifyqcq);
+	/* Don't process AdminQ when it's not up */
+	if (!pdsc_adminq_inc_if_up(pdsc)) {
+		dev_err(pdsc->dev, "%s: called while adminq is unavailable\n",
+			__func__);
+		return;
+	}
+
+	/* Check for NotifyQ event */
+	nq_work = pdsc_process_notifyq(&pdsc->notifyqcq);
 
 	/* Check for empty queue, which can happen if the interrupt was
 	 * for a NotifyQ event and there are no new AdminQ completions.
@@ -117,54 +106,31 @@ void pdsc_process_adminq(struct pdsc_qcq *qcq)
 	spin_lock_irqsave(&pdsc->adminq_lock, irqflags);
 	comp = cq->info[cq->tail_idx].comp;
 	while (pdsc_color_match(comp->color, cq->done_color)) {
-
 		q_info = &q->info[q->tail_idx];
-		index = q->tail_idx;
 		q->tail_idx = (q->tail_idx + 1) & (q->num_descs - 1);
-		cb = q_info->cb;
-		cb_arg = q_info->cb_arg;
 
 		/* Copy out the completion data */
 		memcpy(q_info->dest, comp, sizeof(*comp));
 
-		q_info->cb = NULL;
-		q_info->cb_arg = NULL;
-
-		/* For synchronous AdminQ calls, the cb is NULL and the
-		 * cb_arg is the wait context for the completion.
-		 *
-		 * For async AdminQ calls, this is the caller provided
-		 * callback and argument.  Since we're holding the
-		 * adminq_lock, the callback should take care
-		 * not to try another AdminQ request.
-		 */
-		if (cb) {
-			cb(cb_arg);
-		} else {
-			struct pdsc_wait_context *wc = cb_arg;
-
-			complete_all(&wc->wait_completion);
-		}
+		complete_all(&q_info->wc->wait_completion);
 
 		if (cq->tail_idx == cq->num_descs - 1)
 			cq->done_color = !cq->done_color;
 		cq->tail_idx = (cq->tail_idx + 1) & (cq->num_descs - 1);
 		comp = cq->info[cq->tail_idx].comp;
 
-		a_work++;
+		aq_work++;
 	}
 	spin_unlock_irqrestore(&pdsc->adminq_lock, irqflags);
 
-	qcq->accum_work += a_work;
+	qcq->accum_work += aq_work;
 
 credits:
 	/* Return the interrupt credits, one for each completion */
-	credits = n_work + a_work;
-	if (credits)
-		pds_core_intr_credits(&pdsc->intr_ctrl[qcq->intx],
-				      credits,
-				      PDS_CORE_INTR_CRED_REARM);
-
+	pds_core_intr_credits(&pdsc->intr_ctrl[qcq->intx],
+			      nq_work + aq_work,
+			      PDS_CORE_INTR_CRED_REARM);
+	refcount_dec(&pdsc->adminq_refcnt);
 }
 
 void pdsc_work_thread(struct work_struct *work)
@@ -176,27 +142,19 @@ void pdsc_work_thread(struct work_struct *work)
 
 irqreturn_t pdsc_adminq_isr(int irq, void *data)
 {
-	struct pdsc_qcq *qcq = data;
-	struct pdsc *pdsc = qcq->pdsc;
+	struct pdsc *pdsc = data;
+	struct pdsc_qcq *qcq;
 
-	/* Don't process AdminQ when shutting down */
-	if (pdsc->state & BIT_ULL(PDSC_S_STOPPING_DRIVER)) {
-		pr_err("%s: called while PDSC_S_STOPPING_DRIVER\n", __func__);
+	/* Don't process AdminQ when it's not up */
+	if (!pdsc_adminq_inc_if_up(pdsc)) {
+		dev_err(pdsc->dev, "%s: called while adminq is unavailable\n",
+			__func__);
 		return IRQ_HANDLED;
 	}
 
+	qcq = &pdsc->adminqcq;
 	queue_work(pdsc->wq, &qcq->work);
-
-	//       we can safely re-enable the interrupt here
-	//       more interrupts might come in while we're
-	//       processing this work-queue event, but the
-	//       queue_work() call will see that it is already
-	//       queued and running, so won't enqueue another.
-	//       meanwhile, our processing will see the new
-	//       completions if it hasn't hit the end yet
-	//       and process them accordingly.
-
-	pds_core_intr_mask(&pdsc->intr_ctrl[irq], PDS_CORE_INTR_MASK_CLEAR);
+	refcount_dec(&pdsc->adminq_refcnt);
 
 	return IRQ_HANDLED;
 }
@@ -205,15 +163,14 @@ static int __pdsc_adminq_post(struct pdsc *pdsc,
 			      struct pdsc_qcq *qcq,
 			      union pds_core_adminq_cmd *cmd,
 			      union pds_core_adminq_comp *comp,
-			      void (*comp_cb)(void *cb_arg),
-			      void *cb_arg)
+			      struct pdsc_wait_context *wc)
 {
 	struct pdsc_queue *q = &qcq->q;
 	struct pdsc_q_info *q_info;
 	unsigned long irqflags;
 	unsigned int avail;
-	int ret = 0;
 	int index;
+	int ret;
 
 	spin_lock_irqsave(&pdsc->adminq_lock, irqflags);
 
@@ -225,96 +182,61 @@ static int __pdsc_adminq_post(struct pdsc *pdsc,
 		avail -= q->head_idx + 1;
 	if (!avail) {
 		ret = -ENOSPC;
-		goto err_out;
+		goto err_out_unlock;
 	}
 
 	/* Check that the FW is running */
 	if (!pdsc_is_fw_running(pdsc)) {
-		u8 fw_status = ioread8(&pdsc->info_regs->fw_status);
+		if (pdsc->info_regs) {
+			u8 fw_status =
+				ioread8(&pdsc->info_regs->fw_status);
 
-		dev_info(pdsc->dev, "%s: post failed - fw not running %#02x:\n",
-			 __func__, fw_status);
+			dev_info(pdsc->dev, "%s: post failed - fw not running %#02x:\n",
+				 __func__, fw_status);
+		} else {
+			dev_info(pdsc->dev, "%s: post failed - BARs not setup\n",
+				 __func__);
+		}
 		ret = -ENXIO;
 
-		goto err_out;
+		goto err_out_unlock;
 	}
 
 	/* Post the request */
 	index = q->head_idx;
 	q_info = &q->info[index];
-	q_info->cb = comp_cb;
-	q_info->cb_arg = cb_arg;
+	q_info->wc = wc;
 	q_info->dest = comp;
 	memcpy(q_info->desc, cmd, sizeof(*cmd));
 
-	dev_dbg(pdsc->dev, "head_idx %d tail_idx %d cb_arg %p\n",
-		q->head_idx, q->tail_idx, cb_arg);
+	dev_dbg(pdsc->dev, "head_idx %d tail_idx %d\n",
+		q->head_idx, q->tail_idx);
 	dev_dbg(pdsc->dev, "post admin queue command:\n");
 	dynamic_hex_dump("cmd ", DUMP_PREFIX_OFFSET, 16, 1,
 			 cmd, sizeof(*cmd), true);
 
 	q->head_idx = (q->head_idx + 1) & (q->num_descs - 1);
 
-	pds_core_dbell_ring(pdsc->kern_dbpage, q->hw_type, q->dbval | q->head_idx);
+	pds_core_dbell_ring(pdsc->kern_dbpage,
+			    q->hw_type, q->dbval | q->head_idx);
 	ret = index;
 
-err_out:
+err_out_unlock:
 	spin_unlock_irqrestore(&pdsc->adminq_lock, irqflags);
 	return ret;
 }
 
-static void pdsc_adminq_flush(struct pdsc *pdsc, struct pdsc_qcq *qcq)
-{
-	struct pdsc_q_info *desc_info;
-	unsigned long irqflags;
-	struct pdsc_queue *q;
-
-	spin_lock_irqsave(&pdsc->adminq_lock, irqflags);
-	if (!qcq)
-		goto out_unlock;
-
-	q = &qcq->q;
-
-	while (q->tail_idx != q->head_idx) {
-		desc_info = &q->info[q->tail_idx];
-		memset(desc_info->desc, 0, sizeof(union pds_core_adminq_cmd));
-		desc_info->cb = NULL;
-		desc_info->cb_arg = NULL;
-		q->tail_idx = (q->tail_idx + 1) & (q->num_descs - 1);
-	}
-
-out_unlock:
-	spin_unlock_irqrestore(&pdsc->adminq_lock, irqflags);
-}
-
-int pdsc_adminq_post_async(struct pdsc *pdsc,
-			   struct pdsc_qcq *qcq,
-			   union pds_core_adminq_cmd *cmd,
-			   union pds_core_adminq_comp *comp,
-			   void (*comp_cb)(void *cb_arg),
-			   void *cb_arg)
-{
-	int err = 0;
-	int index;
-
-	index = __pdsc_adminq_post(pdsc, qcq, cmd, comp, comp_cb, cb_arg);
-	if (index < 0)
-		err = index;
-
-	return err;
-}
-
 int pdsc_adminq_post(struct pdsc *pdsc,
-		     struct pdsc_qcq *qcq,
 		     union pds_core_adminq_cmd *cmd,
 		     union pds_core_adminq_comp *comp,
 		     bool fast_poll)
 {
 	struct pdsc_wait_context wc = {
-		.wait_completion = COMPLETION_INITIALIZER_ONSTACK(wc.wait_completion),
-		.qcq = qcq,
+		.wait_completion =
+			COMPLETION_INITIALIZER_ONSTACK(wc.wait_completion),
 	};
 	unsigned long poll_interval = 1;
+	unsigned long poll_jiffies;
 	unsigned long time_limit;
 	unsigned long time_start;
 	unsigned long time_done;
@@ -322,32 +244,46 @@ int pdsc_adminq_post(struct pdsc *pdsc,
 	int err = 0;
 	int index;
 
-	index = __pdsc_adminq_post(pdsc, qcq, cmd, comp, NULL, &wc);
+	if (!pdsc_adminq_inc_if_up(pdsc)) {
+		dev_dbg(pdsc->dev, "%s: preventing adminq cmd %u\n",
+			__func__, cmd->opcode);
+		return -ENXIO;
+	}
+
+	wc.qcq = &pdsc->adminqcq;
+	index = __pdsc_adminq_post(pdsc, &pdsc->adminqcq, cmd, comp, &wc);
 	if (index < 0) {
 		err = index;
-		goto out;
+		goto err_out;
 	}
 
 	time_start = jiffies;
 	time_limit = time_start + HZ * pdsc->devcmd_timeout;
 	do {
 		/* Timeslice the actual wait to catch IO errors etc early */
+		poll_jiffies = msecs_to_jiffies(poll_interval);
 		remaining = wait_for_completion_timeout(&wc.wait_completion,
-							msecs_to_jiffies(poll_interval));
+							poll_jiffies);
 		if (remaining)
 			break;
 
 		if (!pdsc_is_fw_running(pdsc)) {
-			u8 fw_status = ioread8(&pdsc->info_regs->fw_status);
+			if (pdsc->info_regs) {
+				u8 fw_status =
+					ioread8(&pdsc->info_regs->fw_status);
 
-			dev_dbg(pdsc->dev, "%s: post wait failed - fw not running %#02x:\n",
-				__func__, fw_status);
+				dev_dbg(pdsc->dev, "%s: post wait failed - fw not running %#02x:\n",
+					__func__, fw_status);
+			} else {
+				dev_dbg(pdsc->dev, "%s: post wait failed - BARs not setup\n",
+					__func__);
+			}
 			err = -ENXIO;
 			break;
 		}
 
-		/* when fast_poll is not requested, prevent aggressive polling
-		 * on failures due to timeouts by doing exponential back off
+		/* When fast_poll is not requested, prevent aggressive polling
+		 * on failures due to timeouts by doing exponential back off.
 		 */
 		if (!fast_poll && poll_interval < PDSC_ADMINQ_MAX_POLL_INTERVAL)
 			poll_interval <<= 1;
@@ -357,11 +293,8 @@ int pdsc_adminq_post(struct pdsc *pdsc,
 		__func__, jiffies_to_msecs(time_done - time_start));
 
 	/* Check the results */
-	if (time_after_eq(time_done, time_limit)) {
+	if (time_after_eq(time_done, time_limit))
 		err = -ETIMEDOUT;
-		pdsc_adminq_flush(pdsc, qcq);
-		// TODO: deal with waiting async requests
-	}
 
 	dev_dbg(pdsc->dev, "read admin queue completion idx %d:\n", index);
 	dynamic_hex_dump("comp ", DUMP_PREFIX_OFFSET, 16, 1,
@@ -370,14 +303,16 @@ int pdsc_adminq_post(struct pdsc *pdsc,
 	if (remaining && comp->status)
 		err = pdsc_err_to_errno(comp->status);
 
-out:
+err_out:
 	if (err) {
 		dev_dbg(pdsc->dev, "%s: opcode %d status %d err %pe\n",
 			__func__, cmd->opcode, comp->status, ERR_PTR(err));
 		if (err == -ENXIO || err == -ETIMEDOUT)
-			pdsc_queue_health_check(pdsc);
+			queue_work(pdsc->wq, &pdsc->health_work);
 	}
+
+	refcount_dec(&pdsc->adminq_refcnt);
 
 	return err;
 }
-
+EXPORT_SYMBOL_GPL(pdsc_adminq_post);

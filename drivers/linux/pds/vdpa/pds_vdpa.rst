@@ -2,44 +2,44 @@
 .. note: can be edited and viewed with /usr/bin/formiko-vim
 
 ==========================================================
-PCI vDPA driver for the Pensando(R) DSC adapter family
+PCI vDPA driver for the AMD/Pensando(R) DSC adapter family
 ==========================================================
 
-Pensando vDPA VF Device Driver
-Copyright(c) 2022 Pensando Systems, Inc
+AMD/Pensando vDPA VF Device Driver
+
+Copyright(c) 2023 Advanced Micro Devices, Inc
 
 Overview
 ========
 
-The ``pds_vdpa`` driver is a PCI and auxiliary bus driver and supplies
+The ``pds_vdpa`` driver is an auxiliary bus driver that supplies
 a vDPA device for use by the virtio network stack.  It is used with
 the Pensando Virtual Function devices that offer vDPA and virtio queue
 services.  It depends on the ``pds_core`` driver and hardware for the PF
-and for device configuration services.
+and VF PCI handling as well as for device configuration services.
 
 Using the device
 ================
 
 The ``pds_vdpa`` device is enabled via multiple configuration steps and
 depends on the ``pds_core`` driver to create and enable SR-IOV Virtual
-Function devices.
+Function devices.  After the VFs are enabled, we enable the vDPA service
+in the ``pds_core`` device to create the auxiliary devices used by pds_vdpa.
 
-Shown below are the steps to bind the driver to a VF and also to the
-associated auxiliary device created by the ``pds_core`` driver. This
-example assumes the pds_core and pds_vdpa modules are already
-loaded.
+Example steps:
 
 .. code-block:: bash
 
   #!/bin/bash
 
   modprobe pds_core
+  modprobe vdpa
   modprobe pds_vdpa
 
-  PF_BDF=`grep "vDPA.*1" /sys/kernel/debug/pds_core/*/viftypes | head -1 | awk -F / '{print $6}'`
+  PF_BDF=`ls /sys/module/pds_core/drivers/pci\:pds_core/*/sriov_numvfs | awk -F / '{print $7}'`
 
   # Enable vDPA VF auxiliary device(s) in the PF
-  devlink dev param set pci/$PF_BDF name enable_vnet value true cmode runtime
+  devlink dev param set pci/$PF_BDF name enable_vnet cmode runtime value true
 
   # Create a VF for vDPA use
   echo 1 > /sys/bus/pci/drivers/pds_core/$PF_BDF/sriov_numvfs

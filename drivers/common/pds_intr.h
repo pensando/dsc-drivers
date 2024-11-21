@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: (GPL-2.0 OR Linux-OpenIB) OR BSD-2-Clause */
-/* Copyright (c) 2022 Pensando Systems, Inc.  All rights reserved. */
+/* Copyright(c) 2023 Advanced Micro Devices, Inc. */
 
 #ifndef _PDS_INTR_H_
 #define _PDS_INTR_H_
 
-/**
+/*
  * Interrupt control register
  * @coal_init:        Coalescing timer initial value, in
  *                    device units.  Use @identity->intr_coal_mult
@@ -112,20 +112,21 @@ enum pds_core_intr_credits_bits {
 					   PDS_CORE_INTR_CRED_RESET_COALESCE),
 };
 
-static inline void pds_core_intr_coal_init(struct pds_core_intr __iomem *intr_ctrl,
-					   u32 coal)
+static inline void
+pds_core_intr_coal_init(struct pds_core_intr __iomem *intr_ctrl, u32 coal)
 {
 	iowrite32(coal, &intr_ctrl->coal_init);
 }
 
-static inline void pds_core_intr_mask(struct pds_core_intr __iomem *intr_ctrl,
-				      u32 mask)
+static inline void
+pds_core_intr_mask(struct pds_core_intr __iomem *intr_ctrl, u32 mask)
 {
 	iowrite32(mask, &intr_ctrl->mask);
 }
 
-static inline void pds_core_intr_credits(struct pds_core_intr __iomem *intr_ctrl,
-					 u32 cred, u32 flags)
+static inline void
+pds_core_intr_credits(struct pds_core_intr __iomem *intr_ctrl,
+		      u32 cred, u32 flags)
 {
 	if (WARN_ON_ONCE(cred > PDS_CORE_INTR_CRED_COUNT)) {
 		cred = ioread32(&intr_ctrl->credits);
@@ -135,8 +136,8 @@ static inline void pds_core_intr_credits(struct pds_core_intr __iomem *intr_ctrl
 	iowrite32(cred | flags, &intr_ctrl->credits);
 }
 
-static inline void pds_core_intr_clean_flags(struct pds_core_intr __iomem *intr_ctrl,
-					     u32 flags)
+static inline void
+pds_core_intr_clean_flags(struct pds_core_intr __iomem *intr_ctrl, u32 flags)
 {
 	u32 cred;
 
@@ -146,13 +147,14 @@ static inline void pds_core_intr_clean_flags(struct pds_core_intr __iomem *intr_
 	iowrite32(cred, &intr_ctrl->credits);
 }
 
-static inline void pds_core_intr_clean(struct pds_core_intr __iomem *intr_ctrl)
+static inline void
+pds_core_intr_clean(struct pds_core_intr __iomem *intr_ctrl)
 {
 	pds_core_intr_clean_flags(intr_ctrl, PDS_CORE_INTR_CRED_RESET_COALESCE);
 }
 
-static inline void pds_core_intr_mask_assert(struct pds_core_intr __iomem *intr_ctrl,
-					     u32 mask)
+static inline void
+pds_core_intr_mask_assert(struct pds_core_intr __iomem *intr_ctrl, u32 mask)
 {
 	iowrite32(mask, &intr_ctrl->mask_on_assert);
 }

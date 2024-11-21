@@ -1,43 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2022 Pensando Systems, Inc */
-
-/* main PCI driver and mgmt logic */
+/* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/errno.h>
 #include <linux/pci.h>
-#include <linux/aer.h>
+#include <linux/pds/pds_common.h>
 
 #include "core.h"
 
 MODULE_DESCRIPTION(PDSC_DRV_DESCRIPTION);
-MODULE_AUTHOR("Pensando Systems, Inc");
+MODULE_AUTHOR("Advanced Micro Devices, Inc");
 MODULE_LICENSE("GPL");
 
 /* Supported devices */
 static const struct pci_device_id pdsc_id_table[] = {
 	{ PCI_VDEVICE(PENSANDO, PCI_DEVICE_ID_PENSANDO_CORE_PF) },
+	{ PCI_VDEVICE(PENSANDO, PCI_DEVICE_ID_PENSANDO_VDPA_VF) },
 	{ 0, }	/* end of table */
 };
 MODULE_DEVICE_TABLE(pci, pdsc_id_table);
-
-void pdsc_queue_health_check(struct pdsc *pdsc)
-{
-	unsigned long mask;
-
-	/* Don't do a check when in a transition state */
-	mask = BIT_ULL(PDSC_S_INITING_DRIVER) |
-	       BIT_ULL(PDSC_S_STOPPING_DRIVER);
-	if (pdsc->state & mask)
-		return;
-
-	/* Queue a new health check if one isn't already queued */
-	queue_work(pdsc->wq, &pdsc->health_work);
-}
 
 static void pdsc_wdtimer_cb(struct timer_list *t)
 {
@@ -47,7 +28,7 @@ static void pdsc_wdtimer_cb(struct timer_list *t)
 	mod_timer(&pdsc->wdtimer,
 		  round_jiffies(jiffies + pdsc->wdtimer_period));
 
-	pdsc_queue_health_check(pdsc);
+	queue_work(pdsc->wq, &pdsc->health_work);
 }
 
 static void pdsc_unmap_bars(struct pdsc *pdsc)
@@ -55,15 +36,15 @@ static void pdsc_unmap_bars(struct pdsc *pdsc)
 	struct pdsc_dev_bar *bars = pdsc->bars;
 	unsigned int i;
 
-	for (i = 0; i < PDS_CORE_BARS_MAX; i++) {
-		if (bars[i].vaddr) {
-			pcim_iounmap(pdsc->pdev, bars[i].vaddr);
-			bars[i].vaddr = NULL;
-		}
+	pdsc->info_regs = NULL;
+	pdsc->cmd_regs = NULL;
+	pdsc->intr_status = NULL;
+	pdsc->intr_ctrl = NULL;
 
-		bars[i].len = 0;
-		bars[i].bus_addr = 0;
-		bars[i].res_index = 0;
+	for (i = 0; i < PDS_CORE_BARS_MAX; i++) {
+		if (bars[i].vaddr)
+			pci_iounmap(pdsc->pdev, bars[i].vaddr);
+		bars[i].vaddr = NULL;
 	}
 }
 
@@ -74,15 +55,15 @@ static int pdsc_map_bars(struct pdsc *pdsc)
 	struct device *dev = pdsc->dev;
 	struct pdsc_dev_bar *bars;
 	unsigned int i, j;
-	int err = 0;
+	int num_bars = 0;
+	int err;
 	u32 sig;
 
 	bars = pdsc->bars;
-	pdsc->num_bars = 0;
 
 	/* Since the PCI interface in the hardware is configurable,
 	 * we need to poke into all the bars to find the set we're
-	 * expecting.  The will be in the right order.
+	 * expecting.
 	 */
 	for (i = 0, j = 0; i < PDS_CORE_BARS_MAX; i++) {
 		if (!(pci_resource_flags(pdev, i) & IORESOURCE_MEM))
@@ -96,29 +77,26 @@ static int pdsc_map_bars(struct pdsc *pdsc)
 		if (j > 0) {
 			bars[j].vaddr = NULL;
 		} else {
-			bars[j].vaddr = pcim_iomap(pdev, i, bars[j].len);
+			bars[j].vaddr = pci_iomap(pdev, i, bars[j].len);
 			if (!bars[j].vaddr) {
-				dev_err(dev,
-					"Cannot memory-map BAR %d, aborting\n",
-					i);
+				dev_err(dev, "Cannot map BAR %d, aborting\n", i);
 				return -ENODEV;
 			}
 		}
 
 		j++;
 	}
-	pdsc->num_bars = j;
+	num_bars = j;
 
 	/* BAR0: dev_cmd and interrupts */
-	if (pdsc->num_bars < 1) {
+	if (num_bars < 1) {
 		dev_err(dev, "No bars found\n");
 		err = -EFAULT;
 		goto err_out;
 	}
 
 	if (bar->len < PDS_CORE_BAR0_SIZE) {
-		dev_err(dev, "Resource bar size %lu too small\n",
-			bar->len);
+		dev_err(dev, "Resource bar size %lu too small\n", bar->len);
 		err = -EFAULT;
 		goto err_out;
 	}
@@ -137,7 +115,7 @@ static int pdsc_map_bars(struct pdsc *pdsc)
 
 	/* BAR1: doorbells */
 	bar++;
-	if (pdsc->num_bars < 2) {
+	if (num_bars < 2) {
 		dev_err(dev, "Doorbell bar missing\n");
 		err = -EFAULT;
 		goto err_out;
@@ -150,10 +128,6 @@ static int pdsc_map_bars(struct pdsc *pdsc)
 
 err_out:
 	pdsc_unmap_bars(pdsc);
-	pdsc->info_regs = 0;
-	pdsc->cmd_regs = 0;
-	pdsc->intr_status = 0;
-	pdsc->intr_ctrl = 0;
 	return err;
 }
 
@@ -166,72 +140,29 @@ void __iomem *pdsc_map_dbpage(struct pdsc *pdsc, int page_num)
 
 static int pdsc_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
-	struct pds_core_vf_setattr_cmd vfc = { .attr = PDS_CORE_VF_ATTR_STATSADDR };
 	struct pdsc *pdsc = pci_get_drvdata(pdev);
 	struct device *dev = pdsc->dev;
-	enum pds_core_vif_types vt;
-	bool enabled = false;
-	struct pdsc_vf *v;
 	int ret = 0;
-	int i;
 
 	if (num_vfs > 0) {
-
-		pdsc->vfs = kcalloc(num_vfs, sizeof(struct pdsc_vf), GFP_KERNEL);
+		pdsc->vfs = kcalloc(num_vfs, sizeof(struct pdsc_vf),
+				    GFP_KERNEL);
 		if (!pdsc->vfs)
 			return -ENOMEM;
 		pdsc->num_vfs = num_vfs;
 
-		for (i = 0; i < num_vfs; i++) {
-			v = &pdsc->vfs[i];
-			v->stats_pa = dma_map_single(pdsc->dev, &v->stats,
-						     sizeof(v->stats), DMA_FROM_DEVICE);
-			if (dma_mapping_error(pdsc->dev, v->stats_pa)) {
-				dev_err(pdsc->dev, "DMA mapping failed for vf[%d] stats\n", i);
-				v->stats_pa = 0;
-			} else {
-				vfc.stats.len = cpu_to_le32(sizeof(v->stats));
-				vfc.stats.pa = cpu_to_le64(v->stats_pa);
-				(void)pdsc_set_vf_config(pdsc, i, &vfc);
-			}
-		}
-
 		ret = pci_enable_sriov(pdev, num_vfs);
 		if (ret) {
-			dev_err(dev, "Cannot enable SRIOV: %pe\n", ERR_PTR(ret));
+			dev_err(dev, "Cannot enable SRIOV: %pe\n",
+				ERR_PTR(ret));
 			goto no_vfs;
 		}
-
-		/* If any VF types are enabled, start the VF aux devices */
-		for (vt = 0; vt < PDS_DEV_TYPE_MAX && !enabled; vt++)
-			enabled = pdsc->viftype_status[vt].max_devs &&
-				  pdsc->viftype_status[vt].enabled;
-		if (enabled)
-			for (i = 0; i < num_vfs; i++)
-				pdsc_auxbus_dev_add_vf(pdsc, i);
 
 		return num_vfs;
 	}
 
-	i = pci_num_vf(pdev);
-	while (i--)
-		pdsc_auxbus_dev_del_vf(pdsc, i);
-
 no_vfs:
 	pci_disable_sriov(pdev);
-
-	for (i = pdsc->num_vfs - 1; i >= 0; i--) {
-		v = &pdsc->vfs[i];
-
-		if (v->stats_pa) {
-			vfc.stats.len = 0;
-			vfc.stats.pa = 0;
-			(void)pdsc_set_vf_config(pdsc, i, &vfc);
-			dma_unmap_single(pdsc->dev, v->stats_pa,
-					 sizeof(v->stats), DMA_FROM_DEVICE);
-			v->stats_pa = 0;
-		}
-	}
 
 	kfree(pdsc->vfs);
 	pdsc->vfs = NULL;
@@ -240,129 +171,246 @@ no_vfs:
 	return ret;
 }
 
-DEFINE_IDA(pdsc_pf_ida);
+static int pdsc_init_vf(struct pdsc *vf)
+{
+	struct devlink *dl;
+	struct pdsc *pf;
+	int err;
 
-//#define PDSC_WQ_NAME_LEN sizeof(((struct workqueue_struct *)0ULL)->name)
+	pf = pdsc_get_pf_struct(vf->pdev);
+	if (IS_ERR_OR_NULL(pf))
+		return PTR_ERR(pf) ?: -1;
+
+	vf->vf_id = pci_iov_vf_id(vf->pdev);
+
+	dl = priv_to_devlink(vf);
+#ifdef HAVE_DEVL_API
+	devl_lock(dl);
+	devl_register(dl);
+	devl_unlock(dl);
+#else
+	devlink_register(dl);
+#endif
+
+	pf->vfs[vf->vf_id].vf = vf;
+	err = pdsc_auxbus_dev_add(vf, pf);
+	if (err) {
+#ifdef HAVE_DEVL_API
+		devl_lock(dl);
+		devl_unregister(dl);
+		devl_unlock(dl);
+#else
+		devlink_unregister(dl);
+#endif
+	}
+
+	return err;
+}
+
+static const struct devlink_health_reporter_ops pdsc_fw_reporter_ops = {
+	.name = "fw",
+	.diagnose = pdsc_fw_reporter_diagnose,
+};
+
+static const struct devlink_param pdsc_dl_params[] = {
+	DEVLINK_PARAM_GENERIC(ENABLE_VNET,
+			      BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			      pdsc_dl_enable_get,
+			      pdsc_dl_enable_set,
+			      pdsc_dl_enable_validate),
+};
+
 #define PDSC_WQ_NAME_LEN 24
 
-static int pdsc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int pdsc_init_pf(struct pdsc *pdsc)
 {
-	struct device *dev = &pdev->dev;
+	struct devlink_health_reporter *hr;
 	char wq_name[PDSC_WQ_NAME_LEN];
-	struct pdsc *pdsc;
-	int err = 0;
+	struct devlink *dl;
+	int err;
 
-	pdsc = pdsc_dl_alloc(dev);
-	if (!pdsc)
-		return -ENOMEM;
+	pcie_print_link_status(pdsc->pdev);
 
-	pdsc->pdev = pdev;
-	pdsc->dev = &pdev->dev;
-	set_bit(PDSC_S_FW_DEAD, &pdsc->state);
-	set_bit(PDSC_S_INITING_DRIVER, &pdsc->state);
-	pci_set_drvdata(pdev, pdsc);
-	pdsc_debugfs_add_dev(pdsc);
-
-	err = ida_alloc(&pdsc_pf_ida, GFP_KERNEL);
-	if (err < 0) {
-		dev_err(pdsc->dev, "%s: id alloc failed, %pe\n", __func__, ERR_PTR(err));
-		goto err_out_free_devlink;
-	}
-	pdsc->id = err;
-
-	/* Query system for DMA addressing limitation for the device. */
-	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(PDS_CORE_ADDR_LEN));
+	err = pci_request_regions(pdsc->pdev, PDS_CORE_DRV_NAME);
 	if (err) {
-		dev_err(dev, "Unable to obtain 64-bit DMA for consistent allocations, aborting. %pe\n",
+		dev_err(pdsc->dev, "Cannot request PCI regions: %pe\n",
 			ERR_PTR(err));
-		goto err_out_free_devlink;
+		return err;
 	}
-
-	pci_enable_pcie_error_reporting(pdev);
-
-	/* Use devres management */
-	err = pcim_enable_device(pdev);
-	if (err) {
-		dev_err(dev, "Cannot enable PCI device: %pe\n", ERR_PTR(err));
-		goto err_out_free_devlink;
-	}
-
-	err = pci_request_regions(pdev, PDS_CORE_DRV_NAME);
-	if (err) {
-		dev_err(dev, "Cannot request PCI regions: %pe\n", ERR_PTR(err));
-		goto err_out_pci_disable_device;
-	}
-
-	pcie_print_link_status(pdev);
-	pci_set_master(pdev);
 
 	err = pdsc_map_bars(pdsc);
 	if (err)
-		goto err_out_pci_disable_device;
+		goto err_out_release_regions;
 
 	/* General workqueue and timer, but don't start timer yet */
-	snprintf(wq_name, sizeof(wq_name), "%s.%d", PDS_CORE_DRV_NAME, pdsc->id);
+	snprintf(wq_name, sizeof(wq_name), "%s.%d", PDS_CORE_DRV_NAME, pdsc->uid);
 	pdsc->wq = create_singlethread_workqueue(wq_name);
 	INIT_WORK(&pdsc->health_work, pdsc_health_thread);
+	INIT_WORK(&pdsc->pci_reset_work, pdsc_pci_reset_thread);
 	timer_setup(&pdsc->wdtimer, pdsc_wdtimer_cb, 0);
 	pdsc->wdtimer_period = PDSC_WATCHDOG_SECS * HZ;
 
-	/* PDS device setup */
 	mutex_init(&pdsc->devcmd_lock);
 	mutex_init(&pdsc->config_lock);
 	spin_lock_init(&pdsc->adminq_lock);
 
 	mutex_lock(&pdsc->config_lock);
-	init_rwsem(&pdsc->vf_op_lock);
-	err = pdsc_setup(pdsc, PDSC_SETUP_INIT);
-	if (err)
-		goto err_out_unmap_bars;
-	err = pdsc_start(pdsc);
-	if (err)
-		goto err_out_teardown;
+	set_bit(PDSC_S_FW_DEAD, &pdsc->state);
 
-	/* publish devlink device */
-	err = pdsc_dl_register(pdsc);
+	err = pdsc_setup(pdsc, PDSC_SETUP_INIT);
 	if (err) {
-		dev_err(dev, "Cannot register devlink: %pe\n", ERR_PTR(err));
-		goto err_out;
+		mutex_unlock(&pdsc->config_lock);
+		goto err_out_unmap_bars;
+	}
+
+	err = pdsc_start(pdsc);
+	if (err) {
+		mutex_unlock(&pdsc->config_lock);
+		goto err_out_teardown;
 	}
 
 	mutex_unlock(&pdsc->config_lock);
 
-	pdsc->fw_generation = PDS_CORE_FW_STS_F_GENERATION &
-			      ioread8(&pdsc->info_regs->fw_status);
+	dl = priv_to_devlink(pdsc);
+#ifdef HAVE_DEVL_API
+	devl_lock(dl);
+	err = devl_params_register(dl, pdsc_dl_params,
+				   ARRAY_SIZE(pdsc_dl_params));
+	if (err) {
+		devl_unlock(dl);
+		dev_warn(pdsc->dev, "Failed to register devlink params: %pe\n",
+			 ERR_PTR(err));
+		goto err_out_stop;
+	}
+
+	hr = devl_health_reporter_create(dl, &pdsc_fw_reporter_ops, 0, pdsc);
+	if (IS_ERR(hr)) {
+		devl_unlock(dl);
+		dev_warn(pdsc->dev, "Failed to create fw reporter: %pe\n", hr);
+		err = PTR_ERR(hr);
+		goto err_out_unreg_params;
+	}
+	pdsc->fw_reporter = hr;
+
+	devl_register(dl);
+	devl_unlock(dl);
+#else
+	err = devlink_params_register(dl, pdsc_dl_params,
+				      ARRAY_SIZE(pdsc_dl_params));
+	if (err)
+		goto err_out_stop;
+
+	hr = devlink_health_reporter_create(dl, &pdsc_fw_reporter_ops, 0, pdsc);
+	if (IS_ERR(hr)) {
+		dev_warn(pdsc->dev, "Failed to create fw reporter: %pe\n", hr);
+		err = PTR_ERR(hr);
+		goto err_out_unreg_params;
+	}
+	pdsc->fw_reporter = hr;
+	devlink_register(dl);
+#endif
+
 	/* Lastly, start the health check timer */
 	mod_timer(&pdsc->wdtimer, round_jiffies(jiffies + pdsc->wdtimer_period));
+
+	return 0;
+
+err_out_unreg_params:
+	devlink_params_unregister(dl, pdsc_dl_params,
+				  ARRAY_SIZE(pdsc_dl_params));
+err_out_stop:
+	pdsc_stop(pdsc);
+err_out_teardown:
+	pdsc_teardown(pdsc, PDSC_TEARDOWN_REMOVING);
+err_out_unmap_bars:
+	timer_shutdown_sync(&pdsc->wdtimer);
+	if (pdsc->wq)
+		destroy_workqueue(pdsc->wq);
+	mutex_destroy(&pdsc->config_lock);
+	mutex_destroy(&pdsc->devcmd_lock);
+	pci_free_irq_vectors(pdsc->pdev);
+	pdsc_unmap_bars(pdsc);
+err_out_release_regions:
+	pci_release_regions(pdsc->pdev);
+
+	return err;
+}
+
+static const struct devlink_ops pdsc_dl_ops = {
+	.info_get	= pdsc_dl_info_get,
+	.flash_update	= pdsc_dl_flash_update,
+};
+
+static const struct devlink_ops pdsc_dl_vf_ops = {
+};
+
+static DEFINE_IDA(pdsc_ida);
+
+static int pdsc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+{
+	struct device *dev = &pdev->dev;
+	const struct devlink_ops *ops;
+	struct devlink *dl;
+	struct pdsc *pdsc;
+	bool is_pf;
+	int err;
+
+	is_pf = !pdev->is_virtfn;
+	ops = is_pf ? &pdsc_dl_ops : &pdsc_dl_vf_ops;
+	dl = devlink_alloc(ops, sizeof(struct pdsc), dev);
+	if (!dl)
+		return -ENOMEM;
+	pdsc = devlink_priv(dl);
+
+	pdsc->pdev = pdev;
+	pdsc->dev = &pdev->dev;
+	set_bit(PDSC_S_INITING_DRIVER, &pdsc->state);
+	pci_set_drvdata(pdev, pdsc);
+	pdsc_debugfs_add_dev(pdsc);
+
+	err = ida_alloc(&pdsc_ida, GFP_KERNEL);
+	if (err < 0) {
+		dev_err(pdsc->dev, "%s: id alloc failed: %pe\n",
+			__func__, ERR_PTR(err));
+		goto err_out_free_devlink;
+	}
+	pdsc->uid = err;
+
+	/* Query system for DMA addressing limitation for the device. */
+	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(PDS_CORE_ADDR_LEN));
+	if (err) {
+		dev_err(dev, "Unable to obtain 64-bit DMA for consistent allocations, aborting: %pe\n",
+			ERR_PTR(err));
+		goto err_out_free_ida;
+	}
+
+	err = pci_enable_device(pdev);
+	if (err) {
+		dev_err(dev, "Cannot enable PCI device: %pe\n", ERR_PTR(err));
+		goto err_out_free_ida;
+	}
+	pci_set_master(pdev);
+
+	if (is_pf)
+		err = pdsc_init_pf(pdsc);
+	else
+		err = pdsc_init_vf(pdsc);
+	if (err) {
+		dev_err(dev, "Cannot init device: %pe\n", ERR_PTR(err));
+		goto err_out_clear_master;
+	}
 
 	clear_bit(PDSC_S_INITING_DRIVER, &pdsc->state);
 	return 0;
 
-err_out:
-	pdsc_stop(pdsc);
-err_out_teardown:
-	pdsc_teardown(pdsc, true, PDSC_TEARDOWN_REMOVING);
-	pci_free_irq_vectors(pdev);
-err_out_unmap_bars:
-	del_timer_sync(&pdsc->wdtimer);
-	if (pdsc->wq) {
-		flush_workqueue(pdsc->wq);
-		destroy_workqueue(pdsc->wq);
-		pdsc->wq = NULL;
-	}
-	mutex_unlock(&pdsc->config_lock);
-	mutex_destroy(&pdsc->config_lock);
-	mutex_destroy(&pdsc->devcmd_lock);
+err_out_clear_master:
 	pci_clear_master(pdev);
-	pdsc_unmap_bars(pdsc);
-	pci_release_regions(pdev);
-err_out_pci_disable_device:
-	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
+err_out_free_ida:
+	ida_free(&pdsc_ida, pdsc->uid);
 err_out_free_devlink:
-	ida_free(&pdsc_pf_ida, pdsc->id);
 	pdsc_debugfs_del_dev(pdsc);
-	pdsc_dl_free(pdsc);
+	devlink_free(dl);
 
 	return err;
 }
@@ -370,52 +418,194 @@ err_out_free_devlink:
 static void pdsc_remove(struct pci_dev *pdev)
 {
 	struct pdsc *pdsc = pci_get_drvdata(pdev);
-	enum pds_core_vif_types vt;
+	struct devlink *dl;
 
-	/* Undo the devlink registration now to be sure there
+	/* Unhook the registrations first to be sure there
 	 * are no requests while we're stopping.
 	 */
-	pdsc_dl_unregister(pdsc);
+	dl = priv_to_devlink(pdsc);
+#ifdef HAVE_DEVL_API
+	devl_lock(dl);
+	devl_unregister(dl);
+	if (!pdev->is_virtfn) {
+		if (pdsc->fw_reporter) {
+			devl_health_reporter_destroy(pdsc->fw_reporter);
+			pdsc->fw_reporter = NULL;
+		}
+		devl_params_unregister(dl, pdsc_dl_params,
+				       ARRAY_SIZE(pdsc_dl_params));
+	}
+	devl_unlock(dl);
+#else
+	devlink_unregister(dl);
+	if (!pdev->is_virtfn) {
+		if (pdsc->fw_reporter) {
+			devlink_health_reporter_destroy(pdsc->fw_reporter);
+			pdsc->fw_reporter = NULL;
+		}
+		devlink_params_unregister(dl, pdsc_dl_params,
+					   ARRAY_SIZE(pdsc_dl_params));
+	}
+#endif
 
-	/* Remove the aux_bus connections before other cleanup
-	 * so that the clients can use the AdminQ to cleanly
-	 * shut themselves down.
-	 */
-	pdsc_sriov_configure(pdev, 0);
-	for (vt = 0; vt < PDS_DEV_TYPE_MAX; vt++)
-		pdsc_auxbus_dev_del_pf_device(pdsc, vt);
+	if (pdev->is_virtfn) {
+		struct pdsc *pf;
 
-	/* Now we can lock it up and tear it down */
-	mutex_lock(&pdsc->config_lock);
-	set_bit(PDSC_S_STOPPING_DRIVER, &pdsc->state);
+		pf = pdsc_get_pf_struct(pdsc->pdev);
+		if (!IS_ERR(pf)) {
+			pdsc_auxbus_dev_del(pdsc, pf);
+			pf->vfs[pdsc->vf_id].vf = NULL;
+		}
+	} else {
+		/* Remove the VFs and their aux_bus connections before other
+		 * cleanup so that the clients can use the AdminQ to cleanly
+		 * shut themselves down.
+		 */
+		pdsc_sriov_configure(pdev, 0);
 
-	del_timer_sync(&pdsc->wdtimer);
-	if (pdsc->wq) {
-		flush_workqueue(pdsc->wq);
-		destroy_workqueue(pdsc->wq);
-		pdsc->wq = NULL;
+		timer_shutdown_sync(&pdsc->wdtimer);
+		if (pdsc->wq)
+			destroy_workqueue(pdsc->wq);
+
+		mutex_lock(&pdsc->config_lock);
+		set_bit(PDSC_S_STOPPING_DRIVER, &pdsc->state);
+
+		pdsc_stop(pdsc);
+		pdsc_teardown(pdsc, PDSC_TEARDOWN_REMOVING);
+		mutex_unlock(&pdsc->config_lock);
+		mutex_destroy(&pdsc->config_lock);
+		mutex_destroy(&pdsc->devcmd_lock);
+
+		pdsc_unmap_bars(pdsc);
+		pci_release_regions(pdev);
 	}
 
-	/* Device teardown */
-	pdsc_stop(pdsc);
-	pdsc_teardown(pdsc, true, PDSC_TEARDOWN_REMOVING);
-	pdsc_debugfs_del_dev(pdsc);
-	mutex_unlock(&pdsc->config_lock);
-	mutex_destroy(&pdsc->config_lock);
-	mutex_destroy(&pdsc->devcmd_lock);
-	ida_free(&pdsc_pf_ida, pdsc->id);
-
-	/* PCI teardown */
-	pci_free_irq_vectors(pdev);
 	pci_clear_master(pdev);
-	pdsc_unmap_bars(pdsc);
-	pci_release_regions(pdev);
-	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
 
-	/* Devlink and pdsc struct teardown */
-	pdsc_dl_free(pdsc);
+	ida_free(&pdsc_ida, pdsc->uid);
+	pdsc_debugfs_del_dev(pdsc);
+	devlink_free(dl);
 }
+
+static void pdsc_stop_health_thread(struct pdsc *pdsc)
+{
+	if (pdsc->pdev->is_virtfn)
+		return;
+
+	timer_shutdown_sync(&pdsc->wdtimer);
+	if (pdsc->health_work.func)
+		cancel_work_sync(&pdsc->health_work);
+}
+
+static void pdsc_restart_health_thread(struct pdsc *pdsc)
+{
+	if (pdsc->pdev->is_virtfn)
+		return;
+
+	timer_setup(&pdsc->wdtimer, pdsc_wdtimer_cb, 0);
+	mod_timer(&pdsc->wdtimer, jiffies + 1);
+}
+
+static void pdsc_reset_prepare(struct pci_dev *pdev)
+{
+	struct pdsc *pdsc = pci_get_drvdata(pdev);
+
+	pdsc_stop_health_thread(pdsc);
+	/* Send a reset event to clients and then stop
+	 * the PCI interface.  If the VF client stopped
+	 * its PCI stuff, the PCI calls here might be
+	 * redundant but shouldn't hurt anything.
+	 */
+	pdsc_fw_down(pdsc);
+
+	if (pdev->is_virtfn) {
+		struct pdsc *pf;
+
+		pf = pdsc_get_pf_struct(pdsc->pdev);
+		if (!IS_ERR(pf))
+			pdsc_auxbus_dev_del(pdsc, pf);
+	}
+
+	pdsc_unmap_bars(pdsc);
+	pci_release_regions(pdev);
+	if (pci_is_enabled(pdev))
+		pci_disable_device(pdev);
+}
+
+static void pdsc_reset_done(struct pci_dev *pdev)
+{
+	struct pdsc *pdsc = pci_get_drvdata(pdev);
+	struct device *dev = pdsc->dev;
+	int err;
+
+	err = pci_enable_device(pdev);
+	if (err) {
+		dev_err(dev, "Cannot enable PCI device: %pe\n", ERR_PTR(err));
+		return;
+	}
+	pci_set_master(pdev);
+
+	/* Only reconnect PF's PCI bits - a VF client can
+	 * decide on its own if it needs to rework the PCI
+	 * bits, and can do it in the handler for the
+	 * event sent by pdsc_fw_up().
+	 */
+	if (!pdev->is_virtfn) {
+		pcie_print_link_status(pdsc->pdev);
+
+		err = pci_request_regions(pdsc->pdev, PDS_CORE_DRV_NAME);
+		if (err) {
+			dev_err(pdsc->dev, "Cannot request PCI regions: %pe\n",
+				ERR_PTR(err));
+			return;
+		}
+
+		err = pdsc_map_bars(pdsc);
+		if (err)
+			return;
+	}
+
+	pdsc_fw_up(pdsc);
+	pdsc_restart_health_thread(pdsc);
+
+	if (pdev->is_virtfn) {
+		struct pdsc *pf;
+
+		pf = pdsc_get_pf_struct(pdsc->pdev);
+		if (!IS_ERR(pf))
+			pdsc_auxbus_dev_add(pdsc, pf);
+	}
+}
+
+static pci_ers_result_t pdsc_pci_error_detected(struct pci_dev *pdev,
+						pci_channel_state_t error)
+{
+	if (error == pci_channel_io_frozen) {
+		pdsc_reset_prepare(pdev);
+		return PCI_ERS_RESULT_NEED_RESET;
+	}
+
+	return PCI_ERS_RESULT_NONE;
+}
+
+static void pdsc_pci_error_resume(struct pci_dev *pdev)
+{
+	struct pdsc *pdsc = pci_get_drvdata(pdev);
+
+	if (test_bit(PDSC_S_FW_DEAD, &pdsc->state))
+		pci_reset_function_locked(pdev);
+}
+
+static const struct pci_error_handlers pdsc_err_handler = {
+	/* FLR handling */
+	.reset_prepare      = pdsc_reset_prepare,
+	.reset_done         = pdsc_reset_done,
+
+	/* AER handling */
+	.error_detected     = pdsc_pci_error_detected,
+	.resume             = pdsc_pci_error_resume,
+};
 
 static struct pci_driver pdsc_driver = {
 	.name = PDS_CORE_DRV_NAME,
@@ -423,10 +613,20 @@ static struct pci_driver pdsc_driver = {
 	.probe = pdsc_probe,
 	.remove = pdsc_remove,
 	.sriov_configure = pdsc_sriov_configure,
+	.err_handler = &pdsc_err_handler,
 };
+
+void *pdsc_get_pf_struct(struct pci_dev *vf_pdev)
+{
+	return pci_iov_get_pf_drvdata(vf_pdev, &pdsc_driver);
+}
+EXPORT_SYMBOL_GPL(pdsc_get_pf_struct);
 
 static int __init pdsc_init_module(void)
 {
+	if (strcmp(KBUILD_MODNAME, PDS_CORE_DRV_NAME))
+		return -EINVAL;
+
 	pdsc_debugfs_create();
 	return pci_register_driver(&pdsc_driver);
 }
@@ -435,8 +635,6 @@ static void __exit pdsc_cleanup_module(void)
 {
 	pci_unregister_driver(&pdsc_driver);
 	pdsc_debugfs_destroy();
-
-	pr_info("removed\n");
 }
 
 module_init(pdsc_init_module);
