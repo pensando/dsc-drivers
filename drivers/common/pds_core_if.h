@@ -557,7 +557,6 @@ struct pds_core_dev_regs {
 	struct pds_core_dev_info_regs info;
 	struct pds_core_dev_cmd_regs  devcmd;
 } __packed;
-
 #ifndef __CHECKER__
 static_assert(sizeof(struct pds_core_drv_identity) <= 1912);
 static_assert(sizeof(struct pds_core_dev_identity) <= 1912);

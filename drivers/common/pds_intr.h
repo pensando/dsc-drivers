@@ -73,6 +73,7 @@ struct pds_core_intr {
 	u32 coalescing_curr;
 	u32 rsvd6[3];
 };
+
 #ifndef __CHECKER__
 static_assert(sizeof(struct pds_core_intr) == 32);
 #endif /* __CHECKER__ */
