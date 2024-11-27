@@ -218,6 +218,12 @@ static const struct devlink_param pdsc_dl_params[] = {
 			      pdsc_dl_enable_get,
 			      pdsc_dl_enable_set,
 			      pdsc_dl_enable_validate),
+	DEVLINK_PARAM_DRIVER(PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL,
+			     "enable_fwctl", DEVLINK_PARAM_TYPE_BOOL,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     pdsc_dl_enable_get,
+			     pdsc_dl_enable_set,
+			     pdsc_dl_enable_validate),
 };
 
 #define PDSC_WQ_NAME_LEN 24
@@ -270,6 +276,12 @@ static int pdsc_init_pf(struct pdsc *pdsc)
 	}
 
 	mutex_unlock(&pdsc->config_lock);
+
+	err = pdsc_auxbus_dev_add(pdsc, pdsc);
+	if (err) {
+		mutex_unlock(&pdsc->config_lock);
+		goto err_out_teardown;
+	}
 
 	dl = priv_to_devlink(pdsc);
 #ifdef HAVE_DEVL_API
@@ -462,6 +474,7 @@ static void pdsc_remove(struct pci_dev *pdev)
 		 * shut themselves down.
 		 */
 		pdsc_sriov_configure(pdev, 0);
+		pdsc_auxbus_dev_del(pdsc, pdsc);
 
 		timer_shutdown_sync(&pdsc->wdtimer);
 		if (pdsc->wq)
@@ -526,6 +539,7 @@ static void pdsc_reset_prepare(struct pci_dev *pdev)
 		if (!IS_ERR(pf))
 			pdsc_auxbus_dev_del(pdsc, pf);
 	}
+	pdsc_auxbus_dev_del(pdsc, pdsc);
 
 	pdsc_unmap_bars(pdsc);
 	pci_release_regions(pdev);
@@ -576,6 +590,7 @@ static void pdsc_reset_done(struct pci_dev *pdev)
 		if (!IS_ERR(pf))
 			pdsc_auxbus_dev_add(pdsc, pf);
 	}
+	pdsc_auxbus_dev_add(pdsc, pdsc);
 }
 
 static pci_ers_result_t pdsc_pci_error_detected(struct pci_dev *pdev,

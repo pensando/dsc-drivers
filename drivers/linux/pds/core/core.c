@@ -402,6 +402,10 @@ err_out_uninit:
 }
 
 static struct pdsc_viftype pdsc_viftype_defaults[] = {
+	[PDS_DEV_TYPE_FWCTL] = { .name = PDS_DEV_TYPE_FWCTL_STR,
+				 .enabled = true,
+				 .vif_id = PDS_DEV_TYPE_FWCTL,
+				 .dl_id = PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL },
 	[PDS_DEV_TYPE_VDPA] = { .name = PDS_DEV_TYPE_VDPA_STR,
 				.vif_id = PDS_DEV_TYPE_VDPA,
 				.dl_id = DEVLINK_PARAM_GENERIC_ID_ENABLE_VNET },

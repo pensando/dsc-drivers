@@ -27,8 +27,8 @@ int pds_client_register(struct pdsc *pf, char *devname)
 
 	err = pdsc_adminq_post(pf, &cmd, &comp, false);
 	if (err) {
-		dev_info(pf->dev, "register dev_name %s with DSC failed, status %d: %pe\n",
-			 devname, comp.status, ERR_PTR(err));
+		dev_info(pf->dev, "%s: register dev_name %s with DSC failed, status %d: %pe\n",
+			 __func__, devname, comp.status, ERR_PTR(err));
 		return err;
 	}
 
@@ -185,14 +185,20 @@ int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
 
 	mutex_lock(&pf->config_lock);
 
-	padev = pf->vfs[cf->vf_id].padev;
+	if (cf == pf)
+		padev = pf->padev;
+	else
+		padev = pf->vfs[cf->vf_id].padev;
 	if (padev) {
 		pds_client_unregister(pf, padev->client_id);
 		auxiliary_device_delete(&padev->aux_dev);
 		auxiliary_device_uninit(&padev->aux_dev);
 		padev->client_id = 0;
 	}
-	pf->vfs[cf->vf_id].padev = NULL;
+	if (cf == pf)
+		pf->padev = NULL;
+	else
+		pf->vfs[cf->vf_id].padev = NULL;
 
 	mutex_unlock(&pf->config_lock);
 	return err;
@@ -222,17 +228,15 @@ int pdsc_auxbus_dev_add(struct pdsc *cf, struct pdsc *pf)
 		goto out_unlock;
 	}
 
-	/* We only support vDPA so far, so it is the only one to
-	 * be verified that it is available in the Core device and
-	 * enabled in the devlink param.  In the future this might
-	 * become a loop for several VIF types.
-	 */
+	/* So far we only support vDPA for VFs and fwctl for the PF */
 
 	/* Verify that the type is supported and enabled.  It is not
-	 * an error if there is no auxbus device support for this
-	 * VF, it just means something else needs to happen with it.
+	 * an error if there is no auxbus device support.
 	 */
-	vt = PDS_DEV_TYPE_VDPA;
+	if (cf == pf)
+		vt = PDS_DEV_TYPE_FWCTL;
+	else
+		vt = PDS_DEV_TYPE_VDPA;
 	vt_support = !!le16_to_cpu(pf->dev_ident.vif_types[vt]);
 	if (!(vt_support &&
 	      pf->viftype_status[vt].supported &&
@@ -258,7 +262,10 @@ int pdsc_auxbus_dev_add(struct pdsc *cf, struct pdsc *pf)
 		err = PTR_ERR(padev);
 		goto out_unlock;
 	}
-	pf->vfs[cf->vf_id].padev = padev;
+	if (cf == pf)
+		pf->padev = padev;
+	else
+		pf->vfs[cf->vf_id].padev = padev;
 
 out_unlock:
 	mutex_unlock(&pf->config_lock);

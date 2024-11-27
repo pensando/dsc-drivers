@@ -58,6 +58,12 @@ int pdsc_dl_enable_set(struct devlink *dl, u32 id,
 		return 0;
 
 	vt_entry->enabled = ctx->val.vbool;
+	if (vt_entry->vif_id == PDS_DEV_TYPE_FWCTL) {
+		err = ctx->val.vbool ? pdsc_auxbus_dev_add(pdsc, pdsc) :
+				       pdsc_auxbus_dev_del(pdsc, pdsc);
+		return err;
+	}
+
 	for (vf_id = 0; vf_id < pdsc->num_vfs; vf_id++) {
 		struct pdsc *vf = pdsc->vfs[vf_id].vf;
 

@@ -13,11 +13,11 @@
 #include <linux/pds/pds_adminq.h>
 #include <linux/pds/pds_intr.h>
 
-#include <linux/version.h>
 /* TODO: Remove this mess when we move up to Linux v6.3 and
  * can remove the ifdef's for devl_register and friends.
  * The devl_* APIs are what we are using in the upstream code.
  */
+#include <linux/version.h>
 #if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
 #define HAVE_DEVL_API
 #endif
@@ -36,6 +36,11 @@ static inline void timer_shutdown_sync(struct timer_list *timer)
 #define HAVE_DEVLINK_EXTRACT_PARAM
 #endif
 
+#ifndef PDS_DEV_TYPE_FWCTL_STR
+#define PDS_DEV_TYPE_FWCTL     6
+#define PDS_DEV_TYPE_FWCTL_STR "fwctl"
+#endif
+
 #define PDSC_DRV_DESCRIPTION	"AMD/Pensando Core Driver"
 
 #define PDSC_WATCHDOG_SECS	5
@@ -46,6 +51,11 @@ static inline void timer_shutdown_sync(struct timer_list *timer)
 #define PDSC_TEARDOWN_REMOVING	true
 #define PDSC_SETUP_RECOVERY	false
 #define PDSC_SETUP_INIT		true
+
+enum pds_devlink_param_id {
+	PDS_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
+	PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL,
+};
 
 struct pdsc_dev_bar {
 	void __iomem *vaddr;
@@ -180,6 +190,7 @@ struct pdsc {
 	struct dentry *dentry;
 	struct device *dev;
 	struct pdsc_dev_bar bars[PDS_CORE_BARS_MAX];
+	struct pds_auxiliary_dev *padev;
 	struct pdsc_vf *vfs;
 	int num_vfs;
 	int vf_id;
