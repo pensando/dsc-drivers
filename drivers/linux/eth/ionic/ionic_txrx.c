@@ -1082,7 +1082,11 @@ static void ionic_dim_update(struct ionic_qcq *qcq, int napi_mode)
 	dim_update_sample_with_comps(qcq->cq.bound_intr->rearm_count,
 				     pkts, bytes, 0, &dim_sample);
 
+#if defined(IONIC_HAVE_NET_DIM_SAMPLE_PTR) && IS_ENABLED(CONFIG_DIMLIB)
+	net_dim(&qcq->dim, &dim_sample);
+#else
 	net_dim(&qcq->dim, dim_sample);
+#endif
 }
 int ionic_tx_napi(struct napi_struct *napi, int budget)
 {
@@ -1423,9 +1427,6 @@ unsigned int ionic_tx_cq_service(struct ionic_cq *cq,
 	unsigned int work_done = 0;
 	unsigned int bytes = 0;
 	unsigned int pkts = 0;
-
-	if (work_to_do == 0)
-		return 0;
 
 	while (ionic_tx_service(cq, &pkts, &bytes, in_napi)) {
 		if (cq->tail_idx == cq->num_descs - 1)

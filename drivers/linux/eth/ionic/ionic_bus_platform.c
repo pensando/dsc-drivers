@@ -13,6 +13,7 @@
 #include "ionic.h"
 #include "ionic_bus.h"
 #include "ionic_lif.h"
+#include "ionic_aux.h"
 #include "ionic_debugfs.h"
 
 #define IONIC_DEV_BAR         0
@@ -405,12 +406,18 @@ static int ionic_probe(struct platform_device *pfdev)
 		goto err_out_deinit_lifs;
 	}
 
+	err = ionic_auxbus_register(ionic->lif);
+	if (err)
+		goto err_out_deregister_lif;
+
 	mod_timer(&ionic->watchdog_timer,
 		  round_jiffies(jiffies + ionic->watchdog_period));
 	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
 
 	return 0;
 
+err_out_deregister_lif:
+	ionic_lif_unregister(ionic->lif);
 err_out_deinit_lifs:
 	ionic_lif_deinit(ionic->lif);
 err_out_free_lifs:
@@ -449,6 +456,7 @@ static int ionic_remove(struct platform_device *pfdev)
 
 		if (ionic->lif->doorbell_wa)
 			cancel_delayed_work_sync(&ionic->doorbell_check_dwork);
+		ionic_auxbus_unregister(ionic->lif);
 		ionic_lif_unregister(ionic->lif);
 		ionic_lif_deinit(ionic->lif);
 		ionic_lif_free(ionic->lif);

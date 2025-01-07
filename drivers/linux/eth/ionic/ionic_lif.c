@@ -18,6 +18,7 @@
 #include "ionic_txrx.h"
 #include "ionic_ethtool.h"
 #include "ionic_debugfs.h"
+#include "ionic_sysfs.h"
 
 /* queuetype support level */
 static const u8 ionic_qtype_versions[IONIC_QTYPE_MAX] = {
@@ -692,7 +693,7 @@ static int ionic_qcq_alloc(struct ionic_lif *lif, unsigned int type,
 			new->cmb_order = order_base_2(new->cmb_q_size / PAGE_SIZE);
 
 			err = ionic_get_cmb(lif, &new->cmb_pgid, &new->cmb_q_base_pa,
-					    new->cmb_order);
+					    new->cmb_order, 0);
 			if (err) {
 				netdev_err(lif->netdev,
 					   "Cannot allocate queue order %d from cmb: err %d\n",
@@ -1842,7 +1843,7 @@ static int ionic_check_valid_mtu(struct ionic_lif *lif, int new_mtu)
 {
 	int fs;
 
-	fs = new_mtu + ETH_HLEN + VLAN_HLEN;
+	fs = new_mtu + VLAN_ETH_HLEN;
 	if (fs < le32_to_cpu(lif->identity->eth.min_frame_size) ||
 	    fs > le32_to_cpu(lif->identity->eth.max_frame_size)) {
 		netdev_err(lif->netdev, "Invalid MTU %d\n", new_mtu);
@@ -3478,7 +3479,7 @@ int ionic_lif_alloc(struct ionic *ionic)
 	/* find mtu limits */
 	minfs = __le32_to_cpu(lif->identity->eth.min_frame_size);
 	minfs = max_t(unsigned int, minfs, ETH_MIN_MTU);
-	maxfs = __le32_to_cpu(lif->identity->eth.max_frame_size)  - ETH_HLEN - VLAN_HLEN;
+	maxfs = __le32_to_cpu(lif->identity->eth.max_frame_size)  - VLAN_ETH_HLEN;
 #ifdef HAVE_NETDEVICE_MIN_MAX_MTU
 #ifdef HAVE_RHEL7_EXTENDED_MIN_MAX_MTU
 	lif->netdev->extended->min_mtu = minfs;
@@ -4099,6 +4100,8 @@ int ionic_lif_register(struct ionic_lif *lif)
 	err = register_netdevice_notifier(&lif->ionic->nb);
 	if (err)
 		lif->ionic->nb.notifier_call = NULL;
+
+	ionic_lif_set_mgmt_nic_sysfs_group(lif);
 
 	/* only register LIF0 for now */
 	err = register_netdev(lif->netdev);

@@ -467,9 +467,14 @@ static int ionic_phc_gettime64(struct ptp_clock_info *info,
 static long ionic_phc_aux_work(struct ptp_clock_info *info)
 {
 	struct ionic_phc *phc = container_of(info, struct ionic_phc, ptp_info);
+	struct ionic_lif *lif = phc->lif;
 	struct ionic_admin_ctx ctx = {};
 	unsigned long irqflags;
 	int err;
+
+	/* Prevent phc worker from running and restarting in shutdown */
+	if (test_bit(IONIC_LIF_F_IN_SHUTDOWN, lif->state))
+		return -ENODEV;
 
 	/* Do not update phc during device upgrade, but keep polling to resume
 	 * after upgrade.  Since we don't update the point in time basis, there
@@ -477,7 +482,7 @@ static long ionic_phc_aux_work(struct ptp_clock_info *info)
 	 * upgrade.  After upgrade, it will need to be readjusted back to the
 	 * correct time by the ptp daemon.
 	 */
-	if (test_bit(IONIC_LIF_F_FW_RESET, phc->lif->state))
+	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return phc->aux_work_delay;
 
 	spin_lock_irqsave(&phc->lock, irqflags);
@@ -492,7 +497,7 @@ static long ionic_phc_aux_work(struct ptp_clock_info *info)
 
 	spin_unlock_irqrestore(&phc->lock, irqflags);
 
-	ionic_adminq_wait(phc->lif, &ctx, err, true);
+	ionic_adminq_wait(lif, &ctx, err, true);
 
 	return phc->aux_work_delay;
 }
@@ -504,7 +509,8 @@ void ionic_phc_aux_work_helper(struct work_struct *work)
 	long delay;
 
 	delay = ionic_phc_aux_work(&phc->ptp_info);
-	schedule_delayed_work(&phc->dwork, delay);
+	if (delay >= 0)
+		schedule_delayed_work(&phc->dwork, delay);
 }
 #endif
 

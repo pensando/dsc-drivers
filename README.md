@@ -223,3 +223,7 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
  - fix a bogus tx_timeout alarm
  - add ability to build mdev on a newer kernel
  - add int_mnic ip field in dev_info struct
+
+25-01-06 - driver update for 24.12.4-001
+ - new kernel config adaptations
+ - auxiliary_device for RDMA support

@@ -22,8 +22,6 @@ struct ionic_lif;
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_VF	0x1003
 #define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_MGMT	0x1004
 
-#define IONIC_ASIC_TYPE_ELBA	2
-
 #define DEVCMD_TOUT_DEF 5
 #define DEVCMD_TIMEOUT  devcmd_timeout
 #define SHORT_TIMEOUT   1
@@ -39,6 +37,9 @@ extern unsigned int rx_fill_threshold;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
 extern unsigned long affinity_mask_override;
+
+// TODO: remove this -- short term override for expdb feature negotiation
+extern bool expdb_en;
 
 struct ionic_vf {
 	u16	 index;

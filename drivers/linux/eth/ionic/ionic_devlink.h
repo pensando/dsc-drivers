@@ -27,14 +27,14 @@ void ionic_devlink_unregister(struct ionic *ionic);
 #define ionic_devlink_free(i)     devm_kfree(i->dev, i)
 
 #define ionic_devlink_register(x)    0
-#define ionic_devlink_unregister(x)
+#define ionic_devlink_unregister(x) do {} while (0)
 #endif
 
 #if !IS_ENABLED(CONFIG_NET_DEVLINK)
 #define priv_to_devlink(i)  0
-#define devlink_flash_update_begin_notify(d)
-#define devlink_flash_update_end_notify(d)
-#define devlink_flash_update_status_notify(d, s, c, n, t)
+#define devlink_flash_update_begin_notify(d) do {} while (0)
+#define devlink_flash_update_end_notify(d) do {} while (0)
+#define devlink_flash_update_status_notify(d, s, c, n, t) do {} while (0)
 #endif /* CONFIG_NET_DEVLINK */
 
 #endif /* _IONIC_DEVLINK_H_ */

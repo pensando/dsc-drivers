@@ -4,6 +4,7 @@
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
 
+#include "autocompat.h"
 #ifndef LINUX_VERSION_CODE
 #include <linux/version.h>
 #else
@@ -6765,6 +6766,8 @@ static inline void devlink_flash_update_end_notify(struct devlink *dl) { }
 
 #else
 #define HAVE_DEVLINK_PREFETCH_FW
+#define HAVE_ETHTOOL_200G_BITS
+#define HAVE_ETHTOOL_400G_BITS
 static inline void devlink_flash_update_begin_notify(struct devlink *dl) { }
 static inline void devlink_flash_update_end_notify(struct devlink *dl) { }
 #endif /* 5.11.0 */
@@ -6789,18 +6792,8 @@ void _kc_ethtool_sprintf(u8 **data, const char *fmt, ...);
 #endif /* 5.13.0 */
 
 /*****************************************************************************/
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0))
-#if (!RHEL_RELEASE_CODE || (RHEL_RELEASE_CODE && \
-       (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,0))))
-
-#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 6) <= RHEL_RELEASE_CODE))
-#define HAVE_COALESCE_EXTACK
-#endif
-
-#define ndo_eth_ioctl ndo_do_ioctl
-
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
-#if !RHEL_RELEASE_CODE || (RHEL_RELEASE_VERSION(8, 7) > RHEL_RELEASE_CODE)
+#ifndef IONIC_HAVE_DEVLINK_ALLOC_DEV
 static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 						size_t priv_size,
 						struct device *dev)
@@ -6808,30 +6801,28 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 	return devlink_alloc(ops, priv_size);
 }
 #define devlink_alloc  _kc_devlink_alloc
-#else
-#define HAVE_VOID_DEVLINK_REGISTER
 #endif
 #endif /* CONFIG_NET_DEVLINK */
 
-#else
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0))
+#if (!RHEL_RELEASE_CODE || (RHEL_RELEASE_CODE && \
+       (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,0))))
 
-#if RHEL_RELEASE_CODE && RHEL_RELEASE_VERSION(9, 0) < RHEL_RELEASE_CODE
-#define HAVE_COALESCE_EXTACK
+#define ndo_eth_ioctl ndo_do_ioctl
 #endif
 
-#if IS_ENABLED(CONFIG_NET_DEVLINK)
-#define HAVE_VOID_DEVLINK_REGISTER
-#endif /* CONFIG_NET_DEVLINK */
-
-#endif /* not RH or RH < 9.0 */
+#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5))
+#define HAVE_DEVLINK_GENERIC_RDMA_ID
+#endif /* RHEL 9.5 */
 
 #else
 
-#define HAVE_COALESCE_EXTACK
+#define	HAVE_NDO_SIOCDEVPRIVATE
 
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
-#define HAVE_VOID_DEVLINK_REGISTER
-#endif /* CONFIG_NET_DEVLINK */
+#define	HAVE_DEVLINK_GENERIC_RDMA_ID
+#endif
 
 #endif /* 5.15.0 */
 
@@ -6840,7 +6831,6 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_VERSION(8, 7) <= RHEL_RELEASE_CODE && \
 			   RHEL_RELEASE_VERSION(9, 0) != RHEL_RELEASE_CODE))
-#define HAVE_RINGPARAM_EXTACK
 #else
 #define txq_trans_cond_update txq_trans_update
 #endif
@@ -6849,7 +6839,6 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #define MSI_FOR_EACH_DESC(desc, dev)	for_each_msi_entry((desc), dev)
 
 #else
-#define HAVE_RINGPARAM_EXTACK
 #define MSI_INDEX(desc)			desc->msi_index
 #define MSI_FOR_EACH_DESC(desc, dev)	msi_for_each_desc((desc), dev, MSI_DESC_ALL)
 #endif /* 5.17 */
@@ -6878,23 +6867,18 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #endif /* 5.18 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE && \
-	(!RHEL_RELEASE_CODE || \
-	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8, 8) || \
-	 (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 0) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 2))))
+#ifndef IONIC_HAVE_TCP_ALL_HEADERS
 static inline int skb_tcp_all_headers(const struct sk_buff *skb)
 {
 	return skb_transport_offset(skb) + tcp_hdrlen(skb);
 }
-
+#endif
+#ifndef IONIC_HAVE_INNER_TCP_ALL_HEADERS
 static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 {
 	return skb_inner_transport_offset(skb) + inner_tcp_hdrlen(skb);
 }
-
-#else
-#endif /* 6.0 */
-
+#endif
 /*****************************************************************************/
 #if (KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE && \
 	(!RHEL_RELEASE_CODE || \
@@ -6912,18 +6896,32 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #endif /* 6.1 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE && \
-	(!RHEL_RELEASE_CODE || \
-	  RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(9, 2)))
+#ifndef IONIC_HAVE_SET_NETDEV_DEVLINK_PORT
 #define SET_NETDEV_DEVLINK_PORT(dev, port)   devlink_port_type_eth_set(port, dev)
-#else
+#endif
+
+#ifndef IONIC_HAVE_DEVLINK_DRIVER_NAME_PUT
 #define devlink_info_driver_name_put(x, y)  0
-#endif /* 6.2 */
+#endif
+
+#ifndef IONIC_HAVE_VOID_DEVLINK_REGISTER
+#ifndef IONIC_HAVE_DEVLINK_REGISTER_WITH_DEV
+static inline int _kc_devlink_register(struct devlink *devlink, struct device *dev) {
+	return devlink_register(devlink);
+}
+
+#define devlink_register _kc_devlink_register
+#endif
+#endif
 
 /*****************************************************************************/
 #if (KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE)
+#if (RHEL_RELEASE_CODE && RHEL_RELEASE_VERSION(9, 2) < RHEL_RELEASE_CODE)
+#define devlink_param_driverinit_value_set	devl_param_driverinit_value_set
+#endif
 #else
 #define HAVE_RX_PUSH
+#define devlink_param_driverinit_value_set	devl_param_driverinit_value_set
 #endif /* 6.3 */
 
 /*****************************************************************************/
@@ -6944,6 +6942,9 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 
 /*****************************************************************************/
 #if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5))
+#define HAVE_RXFN_EXTACK
+#endif /* RHEL 9.5 */
 #else
 #define HAVE_RXFN_EXTACK
 #endif /* 6.8.0 */
@@ -6966,5 +6967,20 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 			       RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 1)))
 # define fallthrough                    do {} while (0)  /* fallthrough */
 #endif
+
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 9, 0) < LINUX_VERSION_CODE)
+#define HAVE_DEVLINK_EXTRACT_PARAM
+#endif
+
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 11, 0) <= LINUX_VERSION_CODE)
+#define HAVE_KERNEL_ETHTOOL_TS_INFO
+#endif
+
+/*****************************************************************************/
+#if (KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE)
+#define HAVE_IMPORT_NS_STRING
+#endif /* 6.13.0 */
 
 #endif /* _KCOMPAT_H_ */

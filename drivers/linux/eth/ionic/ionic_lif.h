@@ -218,17 +218,6 @@ struct ionic_lif_cfg {
 	void (*reset_cb)(void *priv);
 };
 
-struct ionic_qtype_info {
-	u8  version;
-	u8  supported;
-	u64 features;
-	u16 desc_sz;
-	u16 comp_sz;
-	u16 sg_desc_sz;
-	u16 max_sg_elems;
-	u16 sg_desc_stride;
-};
-
 struct ionic_phc;
 
 #define IONIC_LIF_NAME_MAX_SZ		32
@@ -295,6 +284,9 @@ struct ionic_lif {
 	union ionic_lif_identity *identity;
 	struct ionic_qtype_info qtype_info[IONIC_QTYPE_MAX];
 
+#ifdef CONFIG_AUXILIARY_BUS
+	struct ionic_aux_dev *ionic_adev;
+#endif
 	struct ionic_rx_filters rx_filters;
 	u32 rx_coalesce_usecs;		/* what the user asked for */
 	u32 rx_coalesce_hw;		/* what the hw is using */
@@ -310,6 +302,9 @@ struct ionic_lif {
 
 	struct dentry *dentry;
 	struct bpf_prog *xdp_prog;
+
+	__be32 int_mnic_ip;
+	u8 int_mnic_subnet;
 };
 
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)

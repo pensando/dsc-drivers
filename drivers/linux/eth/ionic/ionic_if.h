@@ -364,9 +364,11 @@ union ionic_drv_identity {
 /**
  * enum ionic_dev_capability - Device capabilities
  * @IONIC_DEV_CAP_VF_CTRL:     Device supports VF ctrl operations
+ * @IONIC_DEV_CAP_DISC_CMB:    Device supports CMB discovery operations
  */
 enum ionic_dev_capability {
 	IONIC_DEV_CAP_VF_CTRL        = BIT(0),
+	IONIC_DEV_CAP_DISC_CMB       = BIT(1),
 };
 
 /**
@@ -487,6 +489,7 @@ enum ionic_logical_qtype {
  * @IONIC_Q_F_4X_DESC:      Quadruple main descriptor size
  * @IONIC_Q_F_4X_CQ_DESC:   Quadruple cq descriptor size
  * @IONIC_Q_F_4X_SG_DESC:   Quadruple sg descriptor size
+ * @IONIC_QIDENT_F_EXPDB:   Queue supports express doorbell
  */
 enum ionic_q_feature {
 	IONIC_QIDENT_F_CQ		= BIT_ULL(0),
@@ -499,6 +502,7 @@ enum ionic_q_feature {
 	IONIC_Q_F_4X_DESC		= BIT_ULL(7),
 	IONIC_Q_F_4X_CQ_DESC		= BIT_ULL(8),
 	IONIC_Q_F_4X_SG_DESC		= BIT_ULL(9),
+	IONIC_QIDENT_F_EXPDB		= BIT_ULL(10),
 };
 
 /**
@@ -650,7 +654,8 @@ union ionic_lif_identity {
 			u8 rrq_stride;
 			u8 rsq_stride;
 			u8 dcqcn_profiles;
-			u8 rsvd_dimensions[10];
+			u8 udma_shift;
+			u8 rsvd_dimensions[9];
 			struct ionic_lif_logical_qtype aq_qtype;
 			struct ionic_lif_logical_qtype sq_qtype;
 			struct ionic_lif_logical_qtype rq_qtype;
@@ -1338,7 +1343,10 @@ enum ionic_xcvr_pid {
 	IONIC_XCVR_PID_SFP_25GBASE_CR_S  = 3,
 	IONIC_XCVR_PID_SFP_25GBASE_CR_L  = 4,
 	IONIC_XCVR_PID_SFP_25GBASE_CR_N  = 5,
-
+	IONIC_XCVR_PID_QSFP_50G_CR2_FC   = 6,
+	IONIC_XCVR_PID_QSFP_50G_CR2      = 7,
+	IONIC_XCVR_PID_QSFP_200G_CR4     = 8,
+	IONIC_XCVR_PID_QSFP_400G_CR4     = 9,
 	/* Fiber */
 	IONIC_XCVR_PID_QSFP_100G_AOC    = 50,
 	IONIC_XCVR_PID_QSFP_100G_ACC    = 51,
@@ -1364,6 +1372,15 @@ enum ionic_xcvr_pid {
 	IONIC_XCVR_PID_SFP_25GBASE_ACC  = 71,
 	IONIC_XCVR_PID_SFP_10GBASE_T    = 72,
 	IONIC_XCVR_PID_SFP_1000BASE_T   = 73,
+	IONIC_XCVR__PID_QSFP_200G_AOC   = 74,
+	IONIC_XCVR__PID_QSFP_200G_FR4   = 75,
+	IONIC_XCVR__PID_QSFP_200G_DR4   = 76,
+	IONIC_XCVR__PID_QSFP_200G_SR4   = 77,
+	IONIC_XCVR__PID_QSFP_200G_ACC   = 78,
+	IONIC_XCVR__PID_QSFP_400G_FR4   = 79,
+	IONIC_XCVR__PID_QSFP_400G_DR4   = 80,
+	IONIC_XCVR__PID_QSFP_400G_SR4   = 81,
+	IONIC_XCVR__PID_QSFP_400G_VR4   = 82,
 };
 
 /**
@@ -1452,6 +1469,8 @@ struct ionic_xcvr_status {
  */
 union ionic_port_config {
 	struct {
+#define IONIC_SPEED_400G	400000	/* 400G in Mbps */
+#define IONIC_SPEED_200G	200000	/* 200G in Mbps */
 #define IONIC_SPEED_100G	100000	/* 100G in Mbps */
 #define IONIC_SPEED_50G		50000	/* 50G in Mbps */
 #define IONIC_SPEED_40G		40000	/* 40G in Mbps */
@@ -3462,16 +3481,27 @@ union ionic_adminq_comp {
 
 /* BAR0 */
 #define IONIC_BAR0_SIZE				0x8000
-#define IONIC_BAR2_SIZE				0x800000
 
 #define IONIC_BAR0_DEV_INFO_REGS_OFFSET		0x0000
 #define IONIC_BAR0_DEV_CMD_REGS_OFFSET		0x0800
 #define IONIC_BAR0_DEV_CMD_DATA_REGS_OFFSET	0x0c00
 #define IONIC_BAR0_INTR_STATUS_OFFSET		0x1000
 #define IONIC_BAR0_INTR_CTRL_OFFSET		0x2000
+
+/* BAR2 */
+#define IONIC_BAR2_SIZE				0x800000
+
+#define IONIC_BAR2_CMB_ENTRY_SIZE		0x800000
+#define IONIC_BAR2_CMB_ENTRY_64B_OFFSET		IONIC_BAR2_CMB_ENTRY_SIZE
+#define IONIC_BAR2_CMB_ENTRY_128B_OFFSET	(2 * IONIC_BAR2_CMB_ENTRY_SIZE)
+
 #define IONIC_DEV_CMD_DONE			0x00000001
 
-#define IONIC_ASIC_TYPE_CAPRI			0
+#define IONIC_ASIC_TYPE_NONE			0
+#define IONIC_ASIC_TYPE_CAPRI			1
+#define IONIC_ASIC_TYPE_ELBA			2
+#define IONIC_ASIC_TYPE_GIGLIO			3
+#define IONIC_ASIC_TYPE_SALINA			4
 
 /**
  * struct ionic_doorbell - Doorbell register layout
