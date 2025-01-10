@@ -14,6 +14,7 @@ function generate_kompat_symbols() {
 IONIC_HAVE_TCP_ALL_HEADERS			symbol		skb_tcp_all_headers		include/linux/tcp.h
 IONIC_HAVE_INNER_TCP_ALL_HEADERS		symbol		skb_inner_tcp_all_headers	include/linux/tcp.h
 IONIC_HAVE_DEVLINK_DRIVER_NAME_PUT		symbol		devlink_info_driver_name_put	include/net/devlink.h
+IONIC_HAVE_DEVLINK_GENERIC_RDMA_ID		symbol		DEVLINK_PARAM_GENERIC_ID_ENABLE_RDMA	include/net/devlink.h
 IONIC_HAVE_SET_NETDEV_DEVLINK_PORT		symbol		SET_NETDEV_DEVLINK_PORT		include/linux/netdevice.h
 IONIC_HAVE_DEVLINK_PARAMS_PUBLISH		symtype		devlink_params_publish		include/net/devlink.h		void(struct devlink *)
 IONIC_HAVE_DEVLINK_ALLOC_DEV			symtype		devlink_alloc			include/net/devlink.h   struct devlink *(const struct devlink_ops *, size_t, struct device *)

@@ -407,7 +407,8 @@ void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 int ionic_db_page_num(struct ionic_lif *lif, int pid);
 
 void ionic_map_cmb(struct ionic *ionic);
-int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int order, u8 stride_log2);
+int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr,
+		  int order, u8 stride_log2, bool *expdb);
 void ionic_put_cmb(struct ionic_lif *lif, u32 pgid, int order);
 
 int ionic_cq_init(struct ionic_lif *lif, struct ionic_cq *cq,

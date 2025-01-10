@@ -6812,17 +6812,9 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #define ndo_eth_ioctl ndo_do_ioctl
 #endif
 
-#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5))
-#define HAVE_DEVLINK_GENERIC_RDMA_ID
-#endif /* RHEL 9.5 */
-
 #else
 
 #define	HAVE_NDO_SIOCDEVPRIVATE
-
-#if IS_ENABLED(CONFIG_NET_DEVLINK)
-#define	HAVE_DEVLINK_GENERIC_RDMA_ID
-#endif
 
 #endif /* 5.15.0 */
 

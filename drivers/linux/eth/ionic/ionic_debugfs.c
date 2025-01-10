@@ -283,25 +283,25 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		txqstats = &lif->txqstats[q->index];
 
 		debugfs_create_u64("dma_map_err", 0400, stats_dentry,
-				   &txqstats[q->index].dma_map_err);
+				   &txqstats->dma_map_err);
 		debugfs_create_u64("pkts", 0400, stats_dentry,
-				   &txqstats[q->index].pkts);
+				   &txqstats->pkts);
 		debugfs_create_u64("bytes", 0400, stats_dentry,
-				   &txqstats[q->index].bytes);
+				   &txqstats->bytes);
 		debugfs_create_u64("clean", 0400, stats_dentry,
-				   &txqstats[q->index].clean);
+				   &txqstats->clean);
 		debugfs_create_u64("linearize", 0400, stats_dentry,
-				   &txqstats[q->index].linearize);
+				   &txqstats->linearize);
 		debugfs_create_u64("csum_none", 0400, stats_dentry,
-				   &txqstats[q->index].csum_none);
+				   &txqstats->csum_none);
 		debugfs_create_u64("csum", 0400, stats_dentry,
-				   &txqstats[q->index].csum);
+				   &txqstats->csum);
 		debugfs_create_u64("crc32_csum", 0400, stats_dentry,
-				   &txqstats[q->index].crc32_csum);
+				   &txqstats->crc32_csum);
 		debugfs_create_u64("tso", 0400, stats_dentry,
-				   &txqstats[q->index].tso);
+				   &txqstats->tso);
 		debugfs_create_u64("frags", 0400, stats_dentry,
-				   &txqstats[q->index].frags);
+				   &txqstats->frags);
 	}
 
 	if (qcq->flags & IONIC_QCQ_F_RX_STATS) {
@@ -311,19 +311,19 @@ void ionic_debugfs_add_qcq(struct ionic_lif *lif, struct ionic_qcq *qcq)
 		rxqstats = &lif->rxqstats[q->index];
 
 		debugfs_create_u64("dma_map_err", 0400, stats_dentry,
-				   &rxqstats[q->index].dma_map_err);
+				   &rxqstats->dma_map_err);
 		debugfs_create_u64("alloc_err", 0400, stats_dentry,
-				   &rxqstats[q->index].alloc_err);
+				   &rxqstats->alloc_err);
 		debugfs_create_u64("pkts", 0400, stats_dentry,
-				   &rxqstats[q->index].pkts);
+				   &rxqstats->pkts);
 		debugfs_create_u64("bytes", 0400, stats_dentry,
-				   &rxqstats[q->index].bytes);
+				   &rxqstats->bytes);
 		debugfs_create_u64("csum_none", 0400, stats_dentry,
-				   &rxqstats[q->index].csum_none);
+				   &rxqstats->csum_none);
 		debugfs_create_u64("csum_complete", 0400, stats_dentry,
-				   &rxqstats[q->index].csum_complete);
+				   &rxqstats->csum_complete);
 		debugfs_create_u64("csum_error", 0400, stats_dentry,
-				   &rxqstats[q->index].csum_error);
+				   &rxqstats->csum_error);
 	}
 
 	cq_dentry = debugfs_create_dir("cq", qcq->dentry);

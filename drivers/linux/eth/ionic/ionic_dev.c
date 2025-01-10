@@ -794,10 +794,13 @@ int ionic_db_page_num(struct ionic_lif *lif, int pid)
 	return (lif->hw_index * lif->dbid_count) + pid;
 }
 
-int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int order, u8 stride_log2)
+int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr,
+		  int order, u8 stride_log2, bool *expdb)
 {
 	struct ionic_dev *idev = &lif->ionic->idev;
-	int ret;
+	void __iomem *nonexpdb_pgptr;
+	phys_addr_t nonexpdb_pgaddr;
+	int ret, i;
 
 	mutex_lock(&idev->cmb_inuse_lock);
 	ret = bitmap_find_free_region(idev->cmb_inuse, idev->cmb_npages,
@@ -809,12 +812,32 @@ int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr, int ord
 
 	*pgid = (u32)ret;
 
-	if (idev->phy_cmb_expdb64_pages && stride_log2 == IONIC_EXPDB_64B_WQE_LG2)
+	if (idev->phy_cmb_expdb64_pages && stride_log2 == IONIC_EXPDB_64B_WQE_LG2) {
 		*pgaddr = idev->phy_cmb_expdb64_pages + ret * PAGE_SIZE;
-	else if (idev->phy_cmb_expdb128_pages && stride_log2 == IONIC_EXPDB_128B_WQE_LG2)
+		if (expdb)
+			*expdb = true;
+	} else if (idev->phy_cmb_expdb128_pages && stride_log2 == IONIC_EXPDB_128B_WQE_LG2) {
 		*pgaddr = idev->phy_cmb_expdb128_pages + ret * PAGE_SIZE;
-	else
+		if (expdb)
+			*expdb = true;
+	} else {
 		*pgaddr = idev->phy_cmb_pages + ret * PAGE_SIZE;
+		if (expdb)
+			*expdb = false;
+	}
+
+	/* clear the requested CMB region, 1 PAGE_SIZE ioremap at a time */
+	nonexpdb_pgaddr = idev->phy_cmb_pages + ret * PAGE_SIZE;
+	for (i = 0; i < (1 << order); i++) {
+		nonexpdb_pgptr = ioremap_wc(nonexpdb_pgaddr + i * PAGE_SIZE,
+					    PAGE_SIZE);
+		if (!nonexpdb_pgptr) {
+			ionic_put_cmb(lif, *pgid, order);
+			return -ENOMEM;
+		}
+		memset_io(nonexpdb_pgptr, 0, PAGE_SIZE);
+		iounmap(nonexpdb_pgptr);
+	}
 
 	return 0;
 }

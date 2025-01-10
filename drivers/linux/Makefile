@@ -85,7 +85,7 @@ endif
 
 # fallback
 ifeq ($(DVER),)
-    DVER = "24.12.4-001"
+    DVER = "25.01.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 

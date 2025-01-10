@@ -263,11 +263,12 @@ void ionic_api_put_intr(void *handle, int intr)
 }
 EXPORT_SYMBOL_GPL(ionic_api_put_intr);
 
-int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order, u8 stride_log2)
+int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order,
+		      u8 stride_log2, bool *expdb)
 {
 	struct ionic_lif *lif = handle;
 
-	return ionic_get_cmb(lif, pgid, pgaddr, order, stride_log2);
+	return ionic_get_cmb(lif, pgid, pgaddr, order, stride_log2, expdb);
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_cmb);
 

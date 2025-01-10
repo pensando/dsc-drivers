@@ -252,10 +252,12 @@ void ionic_api_put_intr(void *handle, int intr);
  * @pgaddr:		First page bus addr (contiguous)
  * @order:		Log base two number of pages (PAGE_SIZE)
  * @stride_log2:	Size of stride to determine CMB pool
+ * @expdb:		Will be set to true if this CMB region has expdb enabled
  *
  * Return: zero or negative error status
  */
-int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order, u8 stride_log2);
+int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order,
+		      u8 stride_log2, bool *expdb);
 
 /**
  * ionic_api_put_cmb() - Release cmb pages
