@@ -7,6 +7,9 @@
 #include <linux/completion.h>
 #include <linux/netdevice.h>
 #include <linux/types.h>
+#ifdef CONFIG_AUXILIARY_BUS
+#include <linux/auxiliary_bus.h>
+#endif
 
 #include "ionic_if.h"
 #include "ionic_regs.h"
@@ -24,6 +27,40 @@
 #define IONIC_API_VERSION "8"
 
 struct dentry;
+
+#ifdef CONFIG_AUXILIARY_BUS
+/**
+ * IONIC_AUX_MODNAME - Auxiliary device name modname prefix
+ *
+ * Auxiliary device name is composed with KBUILD_MODNAME + device name.
+ * This is same as module name which creates the aux device. If module
+ * name is changed, then this also needs to be changed.
+ */
+#define IONIC_AUX_MODNAME "ionic"
+
+#define IONIC_AUX_DEVTYPE "rdma"
+#define IONIC_AUX_DEVNAME IONIC_AUX_MODNAME "." IONIC_AUX_DEVTYPE
+
+/**
+ * struct ionic_aux_dev - Auxiliary device information
+ * @handle:		Handle for this auxiliary device
+ * @idx:		Index identifier
+ * @adev:		Auxiliary device
+ */
+struct ionic_aux_dev {
+	void *handle;
+	int idx;
+
+	/* For compatibility with MOFED, keep adev at the end.
+	 *
+	 * The size of struct auxiliary_device in MOFED is different, due to having some
+	 * additional fields in the MOFED definition of the struct.  Since ionic_rdma
+	 * doesn't use any of the internals of adev, the only thing that matters is that
+	 * the offset of handle and idx are consistent between ionic and ionic_rdma.
+	 */
+	struct auxiliary_device adev;
+};
+#endif
 
 /**
  * struct ionic_devinfo - device information
@@ -50,6 +87,18 @@ enum ionic_api_prsn {
 	IONIC_PRSN_ETH,
 	IONIC_PRSN_RDMA,
 };
+
+/**
+ * ionic_get_netdev_from_handle() - Get a network device associated with the handle
+ * @handle:		Handle to lif
+ *
+ * This returns a network device associated with the lif handle.
+ * If network device is available it holds the reference to device. Caller must
+ * ensure that it releases the device using dev_put() after its usage.
+ *
+ * Return: Network device on success or ERR_PTR(error)
+ */
+struct net_device *ionic_get_netdev_from_handle(void *handle);
 
 /**
  * ionic_get_handle_from_netdev() - Get a handle if the netdev is ionic
@@ -149,6 +198,8 @@ const struct ionic_devinfo *ionic_api_get_devinfo(void *handle);
  */
 struct dentry *ionic_api_get_debug_ctx(void *handle);
 
+#define IONIC_EXPDB_64B_WQE	BIT(0)
+#define IONIC_EXPDB_128B_WQE	BIT(1)
 /**
  * ionic_api_get_identity() - Get result of device identification
  * @handle:		Handle to lif
@@ -158,6 +209,21 @@ struct dentry *ionic_api_get_debug_ctx(void *handle);
  */
 const union ionic_lif_identity *ionic_api_get_identity(void *handle,
 						       int *lif_index);
+
+struct ionic_qtype_info {
+	u8  version;
+	u8  supported;
+	u64 features;
+	u16 desc_sz;
+	u16 comp_sz;
+	u16 sg_desc_sz;
+	u16 max_sg_elems;
+	u16 sg_desc_stride;
+};
+
+struct ionic_qtype_info ionic_api_get_queue_identity(void *handle,
+						     int qtype);
+u8 ionic_api_get_expdb(void *handle);
 
 /**
  * ionic_api_get_intr() - Reserve a device interrupt index
@@ -185,10 +251,13 @@ void ionic_api_put_intr(void *handle, int intr);
  * @pgid:		First page index
  * @pgaddr:		First page bus addr (contiguous)
  * @order:		Log base two number of pages (PAGE_SIZE)
+ * @stride_log2:	Size of stride to determine CMB pool
+ * @expdb:		Will be set to true if this CMB region has expdb enabled
  *
  * Return: zero or negative error status
  */
-int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order);
+int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order,
+		      u8 stride_log2, bool *expdb);
 
 /**
  * ionic_api_put_cmb() - Release cmb pages
@@ -263,6 +332,20 @@ struct ionic_admin_ctx {
  * Return: zero or negative error status
  */
 int ionic_api_adminq_post(void *handle, struct ionic_admin_ctx *ctx);
+
+/**
+ * ionic_api_adminq_post_wait() - Post an admin command and wait for response
+ * @handle:             Handle to lif
+ * @ctx:                API admin command context
+ *
+ * Post the command to an admin queue in the ethernet driver.  If this command
+ * succeeds, then the command has been posted, but that does not indicate a
+ * completion.  If this command returns success, then the completion callback
+ * will eventually be called.
+ *
+ * Return: zero or negative error status
+ */
+int ionic_api_adminq_post_wait(void *handle, struct ionic_admin_ctx *ctx);
 
 /**
  * ionic_error_to_errno() - Transform ionic_if errors to os errno

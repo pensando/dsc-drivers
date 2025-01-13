@@ -16,6 +16,7 @@ enum {
 	SFF8024_ID_QSFP_8438		= 0x0c,
 	SFF8024_ID_QSFP_8436_8636	= 0x0d,
 	SFF8024_ID_QSFP28_8636		= 0x11,
+	SFF8024_ID_QSFP_PLUS_CMIS	= 0x1e,
 };
 
 #include "ionic.h"
@@ -201,6 +202,30 @@ static int ionic_get_link_ksettings(struct net_device *netdev,
 		copper_seen++;
 		break;
 #endif
+
+#ifdef HAVE_ETHTOOL_50G_BITS
+	case IONIC_XCVR_PID_QSFP_50G_CR2_FC:
+	case IONIC_XCVR_PID_QSFP_50G_CR2:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseCR2_Full);
+		copper_seen++;
+		break;
+#endif
+
+#ifdef HAVE_ETHTOOL_200G_BITS
+	case IONIC_XCVR_PID_QSFP_200G_CR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, 200000baseCR4_Full);
+		copper_seen++;
+		break;
+#endif
+
+#ifdef HAVE_ETHTOOL_400G_BITS
+	case IONIC_XCVR_PID_QSFP_400G_CR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, 400000baseCR4_Full);
+		copper_seen++;
+		break;
+#endif
+
 	case IONIC_XCVR_PID_SFP_10GBASE_AOC:
 	case IONIC_XCVR_PID_SFP_10GBASE_CU:
 #ifdef HAVE_ETHTOOL_NEW_10G_BITS
@@ -287,10 +312,54 @@ static int ionic_get_link_ksettings(struct net_device *netdev,
 	case IONIC_XCVR_PID_QSFP_40GBASE_ER4:
 	case IONIC_XCVR_PID_SFP_25GBASE_LR:
 	case IONIC_XCVR_PID_SFP_25GBASE_ER:
-		dev_info(lif->ionic->dev, "no decode bits for xcvr type pid=%d / 0x%x\n",
+		dev_info(lif->ionic->dev,
+			 "no decode bits for xcvr type pid=%d / 0x%x\n",
 			 idev->port_info->status.xcvr.pid,
 			 idev->port_info->status.xcvr.pid);
 		break;
+
+#ifdef HAVE_ETHTOOL_200G_BITS
+	case IONIC_XCVR__PID_QSFP_200G_AOC:
+	case IONIC_XCVR__PID_QSFP_200G_SR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     200000baseSR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_200G_FR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     200000baseLR4_ER4_FR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_200G_DR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     200000baseDR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_200G_ACC:
+		dev_info_once(lif->ionic->dev,
+			      "no decode bits for xcvr type pid=%d / 0x%x\n",
+			      idev->port_info->status.xcvr.pid,
+			      idev->port_info->status.xcvr.pid);
+		break;
+#endif
+
+#ifdef HAVE_ETHTOOL_400G_BITS
+	case IONIC_XCVR__PID_QSFP_400G_FR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     400000baseLR4_ER4_FR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_400G_DR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     400000baseDR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_400G_SR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     400000baseSR4_Full);
+		break;
+	case IONIC_XCVR__PID_QSFP_400G_VR4:
+		dev_info_once(lif->ionic->dev, "no decode bits for xcvr type pid=%d / 0x%x\n",
+			      idev->port_info->status.xcvr.pid,
+			      idev->port_info->status.xcvr.pid);
+		break;
+#endif
+
 	case IONIC_XCVR_PID_UNKNOWN:
 		/* This means there's no module plugged in */
 		if (lif->ionic->is_mgmt_nic)
@@ -304,15 +373,15 @@ static int ionic_get_link_ksettings(struct net_device *netdev,
 		break;
 	}
 
-	bitmap_copy(ks->link_modes.advertising, ks->link_modes.supported,
-		    __ETHTOOL_LINK_MODE_MASK_NBITS);
-
 #ifdef ETHTOOL_FEC_NONE
 	if (idev->port_info->status.fec_type == IONIC_PORT_FEC_TYPE_FC)
-		ethtool_link_ksettings_add_link_mode(ks, advertising, FEC_BASER);
+		ethtool_link_ksettings_add_link_mode(ks, supported, FEC_BASER);
 	else if (idev->port_info->status.fec_type == IONIC_PORT_FEC_TYPE_RS)
-		ethtool_link_ksettings_add_link_mode(ks, advertising, FEC_RS);
+		ethtool_link_ksettings_add_link_mode(ks, supported, FEC_RS);
 #endif
+
+	bitmap_copy(ks->link_modes.advertising, ks->link_modes.supported,
+		    __ETHTOOL_LINK_MODE_MASK_NBITS);
 
 	if (lif->ionic->is_mgmt_nic)
 		ethtool_link_ksettings_add_link_mode(ks, supported, Backplane);
@@ -523,7 +592,7 @@ static int ionic_set_fecparam(struct net_device *netdev,
 }
 
 #endif /* ETHTOOL_FEC_NONE */
-#ifdef HAVE_COALESCE_EXTACK
+#ifdef IONIC_HAVE_ETHTOOL_COALESCE_CQE
 static int ionic_get_coalesce(struct net_device *netdev,
 			      struct ethtool_coalesce *coalesce,
 			      struct kernel_ethtool_coalesce *kernel_coal,
@@ -548,7 +617,7 @@ static int ionic_get_coalesce(struct net_device *netdev,
 	return 0;
 }
 
-#ifdef HAVE_COALESCE_EXTACK
+#ifdef IONIC_HAVE_ETHTOOL_COALESCE_CQE
 static int ionic_set_coalesce(struct net_device *netdev,
 			      struct ethtool_coalesce *coalesce,
 			      struct kernel_ethtool_coalesce *kernel_coal,
@@ -753,7 +822,7 @@ static int ionic_cmb_rings_toggle(struct ionic_lif *lif, bool cmb_tx, bool cmb_r
 	return 0;
 }
 
-#ifdef HAVE_RINGPARAM_EXTACK
+#ifdef IONIC_HAVE_ETHTOOL_SET_RINGPARAM_EXTACK
 static void ionic_get_ringparam(struct net_device *netdev,
 				struct ethtool_ringparam *ring,
 				struct kernel_ethtool_ringparam *kernel_ring,
@@ -775,7 +844,7 @@ static void ionic_get_ringparam(struct net_device *netdev,
 #endif
 }
 
-#ifdef HAVE_RINGPARAM_EXTACK
+#ifdef IONIC_HAVE_ETHTOOL_SET_RINGPARAM_EXTACK
 static int ionic_set_ringparam(struct net_device *netdev,
 			       struct ethtool_ringparam *ring,
 			       struct kernel_ethtool_ringparam *kernel_ring,
@@ -998,25 +1067,6 @@ static int ionic_set_channels(struct net_device *netdev,
 	return err;
 }
 
-static int ionic_get_rxnfc(struct net_device *netdev,
-			   struct ethtool_rxnfc *info, u32 *rules)
-{
-	struct ionic_lif *lif = netdev_priv(netdev);
-	int err = 0;
-
-	switch (info->cmd) {
-	case ETHTOOL_GRXRINGS:
-		info->data = lif->nxqs;
-		break;
-	default:
-		netdev_dbg(netdev, "Command parameter %d is not supported\n",
-			   info->cmd);
-		err = -EOPNOTSUPP;
-	}
-
-	return err;
-}
-
 static u32 ionic_get_priv_flags(struct net_device *netdev)
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
@@ -1204,6 +1254,7 @@ static int ionic_get_module_info(struct net_device *netdev,
 		break;
 	case SFF8024_ID_QSFP_8436_8636:
 	case SFF8024_ID_QSFP28_8636:
+	case SFF8024_ID_QSFP_PLUS_CMIS:
 		modinfo->type = ETH_MODULE_SFF_8436;
 		modinfo->eeprom_len = ETH_MODULE_SFF_8436_LEN;
 		break;
@@ -1243,8 +1294,8 @@ static int ionic_get_module_eeprom(struct net_device *netdev,
 	len = min_t(u32, sizeof(xcvr->sprom), ee->len);
 
 	do {
-		memcpy(data, xcvr->sprom, len);
-		memcpy(tbuf, xcvr->sprom, len);
+		memcpy(data, &xcvr->sprom[ee->offset], len);
+		memcpy(tbuf, &xcvr->sprom[ee->offset], len);
 
 		/* Let's make sure we got a consistent copy */
 		if (!memcmp(data, tbuf, len))
@@ -1259,8 +1310,13 @@ static int ionic_get_module_eeprom(struct net_device *netdev,
 }
 
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+#ifdef HAVE_KERNEL_ETHTOOL_TS_INFO
+static int ionic_get_ts_info(struct net_device *netdev,
+			     struct kernel_ethtool_ts_info *info)
+#else
 static int ionic_get_ts_info(struct net_device *netdev,
 			     struct ethtool_ts_info *info)
+#endif
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
 	struct ionic *ionic = lif->ionic;
@@ -1423,7 +1479,6 @@ static const struct ethtool_ops ionic_ethtool_ops = {
 	.get_sset_count		= ionic_get_sset_count,
 	.get_priv_flags		= ionic_get_priv_flags,
 	.set_priv_flags		= ionic_set_priv_flags,
-	.get_rxnfc		= ionic_get_rxnfc,
 	.get_rxfh_indir_size	= ionic_get_rxfh_indir_size,
 	.get_rxfh_key_size	= ionic_get_rxfh_key_size,
 	.get_rxfh		= ionic_get_rxfh,

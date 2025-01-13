@@ -50,10 +50,21 @@ KSYMS_MNIC = $(KMOD_OUT_DIR)/Module.symvers.mnic
 KSYMS_UIO = $(KMOD_OUT_DIR)/Module.symvers.uio
 
 DVER = $(shell cd $(KMOD_SRC_DIR) ; git describe --tags 2>/dev/null)
+ifneq ($(DVER),)
+    XX = $(shell echo $(DVER) > $(KMOD_SRC_DIR)/git_tag ; ls $(KMOD_SRC_DIR) )
+else
+    DVER = $(shell cat $(KMOD_SRC_DIR)/git_tag)
+endif
 
 else
 
+# this host driver build assumes we're building in the linux-ionic directory
+# or from the drivers-linux-eth package ./drivers directory
+
 DVER = $(shell git describe --tags 2>/dev/null)
+ifeq ($(DVER),)
+    DVER = $(shell cat git_tag 2>/dev/null )
+endif
 
 # Ionic driver for host
 include linux_ver.mk
@@ -72,8 +83,9 @@ ALL = eth
 
 endif
 
+# fallback
 ifeq ($(DVER),)
-    DVER = "24.07.1-001"
+    DVER = "25.01.1-001"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 

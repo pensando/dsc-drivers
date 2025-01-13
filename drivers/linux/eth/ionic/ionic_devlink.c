@@ -8,6 +8,7 @@
 #include "ionic_bus.h"
 #include "ionic_lif.h"
 #include "ionic_devlink.h"
+#include "ionic_aux.h"
 
 #ifdef IONIC_DEVLINK
 #ifdef HAVE_DEVLINK_UPDATE_PARAMS
@@ -96,6 +97,103 @@ static const struct devlink_ops ionic_dl_ops = {
 	.flash_update	= ionic_dl_flash_update,
 };
 
+enum ionic_devlink_param_id {
+	IONIC_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
+#ifndef IONIC_HAVE_DEVLINK_GENERIC_RDMA_ID
+	IONIC_DEVLINK_PARAM_ID_ENABLE_RDMA,
+#endif
+};
+
+static bool is_aux_enabled(struct ionic *ionic)
+{
+#ifdef CONFIG_AUXILIARY_BUS
+	return ionic->lif->ionic_adev ? true : false;
+#else
+	return false;
+#endif
+}
+
+static int ionic_devlink_enable_rdma_get(struct devlink *dl, u32 id,
+					 struct devlink_param_gset_ctx *ctx)
+{
+	ctx->val.vbool = is_aux_enabled(devlink_priv(dl));
+	return 0;
+}
+
+#ifdef HAVE_DEVLINK_EXTRACT_PARAM
+static int ionic_devlink_enable_rdma_set(struct devlink *dl, u32 id,
+					 struct devlink_param_gset_ctx *ctx,
+					 struct netlink_ext_ack *extack)
+#else
+static int ionic_devlink_enable_rdma_set(struct devlink *dl, u32 id,
+					 struct devlink_param_gset_ctx *ctx)
+#endif
+{
+	struct ionic *ionic = devlink_priv(dl);
+	int err = 0;
+
+	if (ctx->val.vbool == is_aux_enabled(ionic))
+		return err;
+
+	if (ctx->val.vbool)
+		err = ionic_auxbus_register(ionic->lif);
+	else
+		ionic_auxbus_unregister(ionic->lif);
+
+	return err;
+}
+
+static int ionic_devlink_enable_rdma_validate(struct devlink *dl, u32 id,
+					      union devlink_param_value val,
+					      struct netlink_ext_ack *extack)
+{
+	struct ionic *ionic = devlink_priv(dl);
+	bool new_state = val.vbool;
+
+	if (new_state && !ionic->nrdma_eqs_per_lif)
+		return -EOPNOTSUPP;
+	return 0;
+}
+
+static const struct devlink_param ionic_dl_rdma_params[] = {
+#ifdef IONIC_HAVE_DEVLINK_GENERIC_RDMA_ID
+	DEVLINK_PARAM_GENERIC(ENABLE_RDMA, BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			      ionic_devlink_enable_rdma_get, ionic_devlink_enable_rdma_set,
+			      ionic_devlink_enable_rdma_validate),
+#else
+	DEVLINK_PARAM_DRIVER(IONIC_DEVLINK_PARAM_ID_ENABLE_RDMA,
+			     "enable_rdma", DEVLINK_PARAM_TYPE_BOOL,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     ionic_devlink_enable_rdma_get, ionic_devlink_enable_rdma_set,
+			     ionic_devlink_enable_rdma_validate),
+#endif
+};
+
+static int ionic_dl_rdma_params_register(struct devlink *dl)
+{
+	int err;
+
+	if (!IS_ENABLED(CONFIG_AUXILIARY_BUS))
+		return 0;
+
+	err = devlink_params_register(dl, ionic_dl_rdma_params, ARRAY_SIZE(ionic_dl_rdma_params));
+	if (err)
+		return err;
+
+#ifdef IONIC_HAVE_DEVLINK_PARAMS_PUBLISH
+	devlink_params_publish(dl);
+#endif
+	return 0;
+}
+
+static void ionic_devlink_rdma_params_unregister(struct devlink *dl)
+{
+	if (!IS_ENABLED(CONFIG_AUXILIARY_BUS))
+		return;
+
+	devlink_params_unregister(dl, ionic_dl_rdma_params, ARRAY_SIZE(ionic_dl_rdma_params));
+}
+
 struct ionic *ionic_devlink_alloc(struct device *dev)
 {
 	struct devlink *dl;
@@ -119,16 +217,24 @@ int ionic_devlink_register(struct ionic *ionic)
 	struct devlink *dl = priv_to_devlink(ionic);
 	int err;
 
-#ifdef HAVE_VOID_DEVLINK_REGISTER
+#ifdef IONIC_HAVE_VOID_DEVLINK_REGISTER
+	err = ionic_dl_rdma_params_register(dl);
+	if (err) {
+		dev_err(ionic->dev, "ionic_dl_rdma_params_register failed: %d\n", err);
+		return err;
+	}
+
 	err = devlink_port_register(dl, &ionic->dl_port, 0);
 	if (err) {
 		dev_err(ionic->dev, "devlink_port_register failed: %d\n", err);
-		devlink_unregister(dl);
+		ionic_devlink_rdma_params_unregister(dl);
 		return err;
 	}
 
 	SET_NETDEV_DEVLINK_PORT(ionic->lif->netdev, &ionic->dl_port);
 	devlink_register(dl);
+
+	return 0;
 #else
 	err = devlink_register(dl, ionic->dev);
 	if (err) {
@@ -139,20 +245,41 @@ int ionic_devlink_register(struct ionic *ionic)
 	err = devlink_port_register(dl, &ionic->dl_port, 0);
 	if (err) {
 		dev_err(ionic->dev, "devlink_port_register failed: %d\n", err);
-		devlink_unregister(dl);
-		return err;
+		goto err_unreg_devlink;
 	}
 
 	devlink_port_type_eth_set(&ionic->dl_port, ionic->lif->netdev);
-#endif
+
+	err = ionic_dl_rdma_params_register(dl);
+	if (err) {
+		dev_err(ionic->dev, "ionic_dl_rdma_params_register failed: %d\n", err);
+		goto err_unreg_all;
+	}
+
 	return 0;
+
+err_unreg_all:
+	devlink_port_type_clear(&ionic->dl_port);
+	devlink_port_unregister(&ionic->dl_port);
+err_unreg_devlink:
+	devlink_unregister(dl);
+
+	return err;
+#endif
 }
 
 void ionic_devlink_unregister(struct ionic *ionic)
 {
 	struct devlink *dl = priv_to_devlink(ionic);
 
+#ifdef IONIC_HAVE_VOID_DEVLINK_REGISTER
+	devlink_unregister(dl);
+	devlink_port_unregister(&ionic->dl_port);
+	ionic_devlink_rdma_params_unregister(dl);
+#else
+	ionic_devlink_rdma_params_unregister(dl);
 	devlink_port_unregister(&ionic->dl_port);
 	devlink_unregister(dl);
+#endif
 }
 #endif /* IONIC_DEVLINK */

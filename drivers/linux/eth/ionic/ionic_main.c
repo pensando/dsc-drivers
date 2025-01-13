@@ -47,6 +47,11 @@ unsigned long asic_addr_len = IONIC_ADDR_LEN;
 module_param(asic_addr_len, ulong, 0600);
 MODULE_PARM_DESC(asic_addr_len, "DMA address bits for mask size");
 
+// TODO: remove this -- short term override for expdb feature negotiation
+bool expdb_en;
+module_param(expdb_en, bool, 0600);
+MODULE_PARM_DESC(expdb_en, "Override expdb feature negotiation");
+
 static const char *ionic_error_to_str(enum ionic_status_code code)
 {
 	switch (code) {
@@ -110,8 +115,9 @@ int ionic_error_to_errno(enum ionic_status_code code)
 	case IONIC_RC_EQTYPE:
 	case IONIC_RC_EQID:
 	case IONIC_RC_EINVAL:
-	case IONIC_RC_ENOSUPP:
 		return -EINVAL;
+	case IONIC_RC_ENOSUPP:
+		return -EOPNOTSUPP;
 	case IONIC_RC_EPERM:
 		return -EPERM;
 	case IONIC_RC_ENOENT:
@@ -656,11 +662,15 @@ int ionic_set_dma_mask(struct ionic *ionic)
 #endif
 	dev_info(dev, "setting %lu bit DMA mask\n", asic_addr_len);
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(asic_addr_len));
-	if (err)
+	if (err) {
 		dev_err(dev, "Unable to obtain 64-bit DMA for consistent allocations, aborting.  err=%d\n",
 			err);
+		return err;
+	}
 
-	return err;
+	dma_set_max_seg_size(dev, 1 * 1024 * 1024 * 1024); //1G
+
+	return 0;
 }
 
 int ionic_setup(struct ionic *ionic)

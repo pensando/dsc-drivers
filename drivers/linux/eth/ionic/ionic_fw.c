@@ -98,7 +98,7 @@ int ionic_firmware_update(struct ionic_lif *lif, const struct firmware *fw)
 
 	netdev_dbg(netdev,
 		   "downloading firmware - size %d part_sz %d nparts %lu\n",
-		   (int)fw->size, buf_sz, DIV_ROUND_UP(fw->size, buf_sz));
+		   (int)fw->size, buf_sz, (unsigned long)DIV_ROUND_UP(fw->size, buf_sz));
 
 	devlink_flash_update_status_notify(dl, "Downloading", NULL, 0, fw->size);
 	offset = 0;
@@ -115,7 +115,7 @@ int ionic_firmware_update(struct ionic_lif *lif, const struct firmware *fw)
 		if (err) {
 			netdev_err(netdev,
 				   "download failed offset 0x%x addr 0x%lx len 0x%x\n",
-				   offset, offsetof(union ionic_dev_cmd_regs, data),
+				   offset, (unsigned long)offsetof(union ionic_dev_cmd_regs, data),
 				   copy_sz);
 			goto err_out;
 		}
