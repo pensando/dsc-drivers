@@ -3,9 +3,11 @@ obj-$(CONFIG_IONIC) += eth/ionic/
 obj-$(CONFIG_IONIC_MNIC) += eth/ionic/
 obj-$(CONFIG_MDEV) += mdev/
 obj-$(CONFIG_MNET_UIO_PDRV_GENIRQ) += mnet_uio_pdrv_genirq/
+obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
 else
 
 IONIC_ETH_SRC = $(CURDIR)/eth/ionic
+IONIC_RDMA_SRC = $(CURDIR)/rdma/drv/ionic
 
 #KOPT += V=1		# verbose build
 #KOPT += W=1		# extra warnings
@@ -13,14 +15,21 @@ IONIC_ETH_SRC = $(CURDIR)/eth/ionic
 #KOPT += CHECK=sparse	# static analysis tool
 #KOPT += CHECK=scripts/coccicheck
 
+ETH_KOPT += CONFIG_INFINIBAND_IONIC=_
+RDMA_KOPT += CONFIG_INFINIBAND_IONIC=m
+RDMA_KOPT += CONFIG_IONIC=_
+
 default: all
 
-# Discover kernel configuration.
+# Discover kernel and open fabrics configuration.
 #
 # Override running kernel with
 # `make KSRC=/path/to/your/sources` or
 # `export KSRC=/path/to/your/sources`
 #
+# Override default open fabrics with
+# `make OFA_KSRC=/path/to/your/sources` or
+# `export OFA_KSRC=/path/to/your/sources`
 
 ifeq ($(ARCH),aarch64)
 
@@ -42,6 +51,7 @@ KCFLAGS += -DCONFIG_IONIC_MNIC
 KCFLAGS += -DCONFIG_MDEV
 KCFLAGS += -DCONFIG_MNET_UIO_PDRV_GENIRQ
 ALL = mnic
+ALL += mnic_rdma
 ALL += mnet_uio_pdrv_genirq
 ALL += mdev
 export PATH := $(PATH):$(TOOLCHAIN_DIR)/bin
@@ -79,13 +89,52 @@ KCFLAGS += -DCONFIG_IONIC
 KCFLAGS = -Werror
 KCFLAGS += $(EXTRA_CFLAGS)
 
+
 ALL = eth
 
+# Ionic rdma driver, if present
+ifneq ($(wildcard $(IONIC_RDMA_SRC)),)
+ALL += rdma
+
+# Build for OFA rdma stack, if present
+OFA_KSRC ?= /usr/src/ofa_kernel/default
+ifneq ($(wildcard $(OFA_KSRC)),)
+
+LINUXINCLUDE = -include $(OFA_KSRC)/include/generated/autoconf.h \
+	       -include $$(srctree)/include/linux/kconfig.h \
+	       -include $(OFA_KSRC)/include/linux/kconfig.h \
+	       -include $(OFA_KSRC)/include/linux/compat-2.6.h \
+	       -I$(OFA_KSRC)/include \
+	       -I$(OFA_KSRC)/include/uapi \
+	       -I$(OFA_KSRC)/drivers/infiniband/debug \
+	       -I$$(srctree)/arch/$$(SRCARCH)/include \
+	       -I$$(objtree)/arch/$$(SRCARCH)/include/generated \
+	       -I$$(objtree)/include \
+	       -I$$(srctree)/arch/$$(SRCARCH)/include/uapi \
+	       -I$$(objtree)/arch/$$(SRCARCH)/include/generated/uapi \
+	       -I$$(srctree)/include \
+	       -I$$(srctree)/include/uapi \
+	       -I$$(objtree)/include/generated/uapi \
+	       $$(if $$(KBUILD_SRC), -I$$(objtree)/include2 -I$$(srctree)/include) \
+	       -I$$(srctree)/arch/$$(SRCARCH)/include \
+	       -I$$(objtree)/arch/$$(SRCARCH)/include/generated \
+
+OFA_KOPT += LINUXINCLUDE='$(LINUXINCLUDE)'
+OFA_KSYMS += $(OFA_KSRC)/Module.symvers
+
+# OFA does not provide semantic versioning for its kernel api.
+# Out-of-tree compatibility is based on hash in compat_version.
+OFA_HASH := $(shell cat '$(OFA_KSRC)/compat_version')
+OFA_KOPT += KCPPFLAGS="-DOFA_KERNEL=$(OFA_HASH)"
+# Relying on undefined macros evaluate to zero, do not warn.
+KCFLAGS += -Wno-undef
+endif
+endif
 endif
 
 # fallback
 ifeq ($(DVER),)
-    DVER = "25.01.1-001"
+    DVER = "25.01.1-001r"
 endif
 KCFLAGS += -Ddrv_ver=\\\"$(DVER)\\\"
 
@@ -104,6 +153,15 @@ mnic:
 	touch $(KMOD_OUT_DIR)/Makefile
 	$(MAKE) -C $(KSRC) V=1 M=$(KMOD_OUT_DIR) src=$(KMOD_SRC_DIR)/eth/ionic $(KOPT)
 	mv ${KMOD_OUT_DIR}/Module.symvers ${KMOD_OUT_DIR}/Module.symvers.mnic
+
+
+
+mnic_rdma: mnic
+mnic_rdma: KOPT+=$(RDMA_KOPT)
+mnic_rdma: KSYMS+=$(KSYMS_MNIC)
+mnic_rdma:
+	@echo "===> Building MNIC RDMA driver "
+	$(MAKE) -C $(KSRC) M=$(KMOD_OUT_DIR) KMOD_SRC_DIR=$(KMOD_SRC_DIR) src=$(KMOD_SRC_DIR)/rdma/drv/ionic $(KOPT)
 
 mnet_uio_pdrv_genirq: KOPT+=$(ETH_KOPT)
 mnet_uio_pdrv_genirq:
@@ -124,10 +182,26 @@ eth:
 	+$(KBUILD_RULE)
 	mv $(CURDIR)/Module.symvers $(CURDIR)/Module.symvers.ionic
 
+# The "private" makefile variables are not passed to prerequisite targets.
+#
+# The eth driver is required by the rdma driver, but we do not want to build the eth
+# driver with OFA kernel opts.  Only apply the OFA kernel opts to the rdma driver.
+
+rdma: eth
+rdma: private KOPT+=$(OFA_KOPT)
+rdma: private KOPT+=$(RDMA_KOPT)
+rdma: private KSYMS+=$(OFA_KSYMS)
+rdma: private KSYMS+=$(CURDIR)/Module.symvers.ionic
+rdma:
+	@echo "===> Building RDMA driver "
+	+$(KBUILD_RULE)
+	mv $(CURDIR)/Module.symvers $(CURDIR)/Module.symvers.ionic_rdma || true
+
 clean: KOPT+=$(ETH_KOPT)
 clean:
 	$(KBUILD_RULE) clean
 	rm -f $(CURDIR)/Module.symvers*
+	rm -f $(IONIC_RDMA_SRC)/autocompat.h $(IONIC_ETH_SRC)/autocompat.h
 
 KBUILD_INSTALL_RULE = $(MAKE) -C $(KSRC) $(KOPT) \
 		      $(if ${DISABLE_MODULE_SIGNING},CONFIG_MODULE_SIG=n) \
@@ -137,15 +211,16 @@ KBUILD_INSTALL_RULE = $(MAKE) -C $(KSRC) $(KOPT) \
 
 install: modules_install
 modules_install: KOPT+=$(ETH_KOPT)
+modules_install: KOPT+=$(RDMA_KOPT)
 modules_install:
 	@$(call warn_signed_modules)
 	$(KBUILD_INSTALL_RULE) modules_install
 	$(call cmd_depmod)
 
 cscope:
-	find $(IONIC_ETH_SRC) -name '*.[ch]' > cscope.files
+	find $(IONIC_ETH_SRC) $(IONIC_RDMA_SRC) -name '*.[ch]' > cscope.files
 	cscope -bkq
 
-.PHONY: default all mnic mdev mnet_uio_pdrv_genirq eth clean install modules_install cscope
+.PHONY: default all mnic mnic_rdma mdev mnet_uio_pdrv_genirq eth rdma clean install modules_install cscope
 
 endif
