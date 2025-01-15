@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
+# Copyright (c) 2020 Pensando Systems, Inc
+
+config INFINIBAND_IONIC
+	tristate "Pensando DSC RDMA/RoCE Support"
+	depends on NETDEVICES && ETHERNET && PCI && INET && 64BIT
+	select NET_VENDOR_PENSANDO
+	select IONIC
+	help
+	  This enables RDMA/RoCE support for the Pensando family of Distributed
+	  Services Cards (DSCs).
+
+	  To learn more, visit our website at <https://pensando.io>.
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called ionic_rdma.

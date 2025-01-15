@@ -227,3 +227,6 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 25-01-06 - driver update for 25.01.1-001
  - new kernel config adaptations
  - auxiliary_device for RDMA support
+
+25-01-16 - add RDMA driver for 25.01.1-001
+ - add the AMD/Pensando RDMA auxiliary_device driver
