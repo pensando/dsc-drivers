@@ -405,7 +405,7 @@ static struct pdsc_viftype pdsc_viftype_defaults[] = {
 	[PDS_DEV_TYPE_FWCTL] = { .name = PDS_DEV_TYPE_FWCTL_STR,
 				 .enabled = true,
 				 .vif_id = PDS_DEV_TYPE_FWCTL,
-				 .dl_id = PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL },
+				 .dl_id = -1 },
 	[PDS_DEV_TYPE_VDPA] = { .name = PDS_DEV_TYPE_VDPA_STR,
 				.vif_id = PDS_DEV_TYPE_VDPA,
 				.dl_id = DEVLINK_PARAM_GENERIC_ID_ENABLE_VNET },
@@ -640,8 +640,8 @@ void pdsc_health_thread(struct work_struct *work)
 		goto out_unlock;
 
 	healthy = pdsc_is_fw_good(pdsc);
-	dev_dbg(pdsc->dev, "%s: health %d fw_status %#02x fw_heartbeat %d\n",
-		__func__, healthy, pdsc->fw_status, pdsc->last_hb);
+	// dev_dbg(pdsc->dev, "%s: health %d fw_status %#02x fw_heartbeat %d\n",
+	// 	__func__, healthy, pdsc->fw_status, pdsc->last_hb);
 
 	if (test_bit(PDSC_S_FW_DEAD, &pdsc->state)) {
 		if (healthy)

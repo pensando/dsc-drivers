@@ -5,11 +5,9 @@
 #define _PDS_CORE_ADMINQ_H_
 
 #define PDSC_ADMINQ_MAX_POLL_INTERVAL	256
-#define PDS_DEFAULT_ADMINQ	0
 
 enum pds_core_adminq_flags {
-	PDS_AQ_FLAG_ASYNC	= BIT(0),	/* perform async AQ command */
-	PDS_AQ_FLAG_FASTPOLL	= BIT(1),	/* poll for completion at 1ms intervals */
+	PDS_AQ_FLAG_FASTPOLL	= BIT(1),	/* completion poll at 1ms */
 };
 
 /*
@@ -820,6 +818,8 @@ struct pds_vdpa_set_features_cmd {
 	__le64 features;
 };
 
+
+
 #define PDS_LM_DEVICE_STATE_LENGTH		65536
 #define PDS_LM_CHECK_DEVICE_STATE_LENGTH(X)					\
 			PDS_CORE_SIZE_CHECK(union, PDS_LM_DEVICE_STATE_LENGTH, X)
@@ -832,6 +832,7 @@ enum pds_lm_cmd_opcode {
 
 	/* Device state commands */
 	PDS_LM_CMD_STATE_SIZE	   = 16,
+	PDS_LM_CMD_THROTTLE        = 17,
 	PDS_LM_CMD_SUSPEND         = 18,
 	PDS_LM_CMD_SUSPEND_STATUS  = 19,
 	PDS_LM_CMD_RESUME          = 20,
@@ -1214,6 +1215,7 @@ struct pds_lm_dirty_seq_ack_cmd {
 enum pds_fwctl_cmd_opcode {
 	PDS_FWCTL_CMD_IDENT		= 70,
 	PDS_FWCTL_CMD_RPC		= 71,
+	PDS_FWCTL_CMD_QUERY		= 72,
 };
 
 /**
@@ -1272,6 +1274,107 @@ struct pds_fwctl_ident {
 	__le32 max_resp_sz;
 	u8     max_req_sg_elems;
 	u8     max_resp_sg_elems;
+} __packed;
+
+enum pds_fwctl_query_entity {
+	PDS_FWCTL_RPC_ROOT		= 0,
+	PDS_FWCTL_RPC_ENDPOINT	= 1,
+	PDS_FWCTL_RPC_OPERATION	= 2,
+};
+
+#define PDS_FWCTL_RPC_OPCODE_CMD_MASK		0x0000FFFF
+#define PDS_FWCTL_RPC_OPCODE_CMD_SHIFT		0
+#define PDS_FWCTL_RPC_OPCODE_VER_MASK		0x00FF0000
+#define PDS_FWCTL_RPC_OPCODE_VER_SHIFT		16
+#define PDS_FWCTL_RPC_OPCODE_RSVD_MASK		0xFF000000
+#define PDS_FWCTL_RPC_OPCODE_RSVD_SHIFT		24
+
+#define PDS_FWCTL_RPC_OPCODE_GET_CMD(op)	\
+	(((op) & PDS_FWCTL_RPC_OPCODE_CMD_MASK) >> PDS_FWCTL_RPC_OPCODE_CMD_SHIFT)
+#define PDS_FWCTL_RPC_OPCODE_GET_VER(op)	\
+	(((op) & PDS_FWCTL_RPC_OPCODE_VER_MASK) >> PDS_FWCTL_RPC_OPCODE_VER_SHIFT)
+#define PDS_FWCTL_RPC_OPCODE_GET_RSVD(op)	\
+	(((op) & PDS_FWCTL_RPC_OPCODE_RSVD_MASK) >> PDS_FWCTL_RPC_OPCODE_RSVD_SHIFT)
+
+#define PDS_FWCTL_RPC_OPCODE_CMP(op1, op2) \
+	(PDS_FWCTL_RPC_OPCODE_GET_CMD(op1) == PDS_FWCTL_RPC_OPCODE_GET_CMD(op2) && \
+	 PDS_FWCTL_RPC_OPCODE_GET_VER(op1) <= PDS_FWCTL_RPC_OPCODE_GET_VER(op2))
+
+/**
+ * struct pds_fwctl_query_cmd - Firmware control query command structure
+ * @opcode: Operation code for the command
+ * @entity: Entity type to query (enum pds_fwctl_query_entity)
+ * @version: Version of the query data structure supported by the driver
+ * @query_data_buf_len: Length of the query data buffer
+ * @query_data_buf_pa: Physical address of the query data buffer
+ * @ep: Endpoint identifier to query	(when entity is PDS_FWCTL_RPC_ENDPOINT)
+ * @op: Operation identifier to query	(when entity is PDS_FWCTL_RPC_OPERATION)
+ *
+ * This structure is used to send a query command to the firmware control
+ * interface. The structure is packed to ensure there is no padding between
+ * the fields.
+ */
+struct pds_fwctl_query_cmd {
+	u8     opcode;
+	u8     entity;
+	u8     version;
+	u8     rsvd;
+	__le32 query_data_buf_len;
+	__le64 query_data_buf_pa;
+	union {
+		__le32 ep;
+		__le32 op;
+	};
+} __packed;
+
+/**
+ * struct pds_fwctl_query_comp - Firmware control query completion structure
+ * @status: Status of the query command
+ * @comp_index: Completion index in little-endian format
+ * @version: Version of the query data structure returned by firmware. This
+ * 		 should be less than or equal to the version supported by the driver.
+ * @color: Color bit indicating the state of the completion
+ */
+struct pds_fwctl_query_comp {
+	u8     status;
+	u8     rsvd;
+	__le16 comp_index;
+	u8     version;
+	u8     rsvd2[2];
+	u8     color;
+} __packed;
+
+/**
+ * struct pds_fwctl_query_data_endpoint - query data for entity PDS_FWCTL_RPC_ROOT
+ * @id: The identifier for the data endpoint.
+ */
+struct pds_fwctl_query_data_endpoint {
+	__le32 id;
+} __packed;
+
+/**
+ * struct pds_fwctl_query_data_operation - query data for entity PDS_FWCTL_RPC_ENDPOINT
+ * @id: Operation identifier.
+ * @scope: Scope of the operation (enum fwctl_rpc_scope).
+ */
+struct pds_fwctl_query_data_operation {
+	__le32 id;
+	u8     scope;
+	u8     rsvd[3];
+} __packed;
+
+/**
+ * struct pds_fwctl_query_data - query data structure
+ * @version: Version of the query data structure
+ * @num_entries: Number of entries in the union
+ * @rsvd: Word boundary padding
+ * @entries: Array of query data entries, depending on the entity type.
+ */
+struct pds_fwctl_query_data {
+	u8      version;
+	u8      rsvd[3];
+	__le32  num_entries;
+	uint8_t entries[];
 } __packed;
 
 /**
@@ -1384,6 +1487,7 @@ union pds_core_adminq_cmd {
 	struct pds_fwctl_cmd		  fwctl;
 	struct pds_fwctl_ident_cmd	  fwctl_ident;
 	struct pds_fwctl_rpc_cmd	  fwctl_rpc;
+	struct pds_fwctl_query_cmd	  fwctl_query;
 };
 
 union pds_core_adminq_comp {
@@ -1414,6 +1518,7 @@ union pds_core_adminq_comp {
 
 	struct pds_fwctl_comp		  fwctl;
 	struct pds_fwctl_rpc_comp	  fwctl_rpc;
+	struct pds_fwctl_query_comp	  fwctl_query;
 };
 
 #ifndef __CHECKER__

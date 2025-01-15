@@ -24,7 +24,7 @@ static void pdsc_wdtimer_cb(struct timer_list *t)
 {
 	struct pdsc *pdsc = from_timer(pdsc, t, wdtimer);
 
-	dev_dbg(pdsc->dev, "%s: jiffies %ld\n", __func__, jiffies);
+	// dev_dbg(pdsc->dev, "%s: jiffies %ld\n", __func__, jiffies);
 	mod_timer(&pdsc->wdtimer,
 		  round_jiffies(jiffies + pdsc->wdtimer_period));
 
@@ -218,12 +218,6 @@ static const struct devlink_param pdsc_dl_params[] = {
 			      pdsc_dl_enable_get,
 			      pdsc_dl_enable_set,
 			      pdsc_dl_enable_validate),
-	DEVLINK_PARAM_DRIVER(PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL,
-			     "enable_fwctl", DEVLINK_PARAM_TYPE_BOOL,
-			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
-			     pdsc_dl_enable_get,
-			     pdsc_dl_enable_set,
-			     pdsc_dl_enable_validate),
 };
 
 #define PDSC_WQ_NAME_LEN 24

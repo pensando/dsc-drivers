@@ -52,11 +52,6 @@ static inline void timer_shutdown_sync(struct timer_list *timer)
 #define PDSC_SETUP_RECOVERY	false
 #define PDSC_SETUP_INIT		true
 
-enum pds_devlink_param_id {
-	PDS_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
-	PDS_DEVLINK_PARAM_ID_ENABLE_FWCTL,
-};
-
 struct pdsc_dev_bar {
 	void __iomem *vaddr;
 	phys_addr_t bus_addr;

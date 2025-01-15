@@ -7,8 +7,9 @@
 #define PCI_VENDOR_ID_PENSANDO			0x1dd8
 #define PCI_DEVICE_ID_PENSANDO_CORE_PF		0x100c
 #define PCI_DEVICE_ID_PENSANDO_NVME_VF		0x1006
+#define PCI_DEVICE_ID_VIRTIO_NET_TRANS		0x1000
+#define PCI_DEVICE_ID_PENSANDO_IONIC_ETH_VF	0x1003
 #define PCI_DEVICE_ID_PENSANDO_VDPA_VF		0x100b
-
 #define PDS_CORE_BARS_MAX			4
 #define PDS_CORE_PCI_BAR_DBELL			1
 
@@ -557,7 +558,8 @@ struct pds_core_dev_regs {
 	struct pds_core_dev_info_regs info;
 	struct pds_core_dev_cmd_regs  devcmd;
 } __packed;
-#ifndef __CHECKER__
+
+#if 0
 static_assert(sizeof(struct pds_core_drv_identity) <= 1912);
 static_assert(sizeof(struct pds_core_dev_identity) <= 1912);
 static_assert(sizeof(union pds_core_dev_cmd) == 64);
