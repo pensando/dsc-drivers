@@ -46,6 +46,7 @@ struct pdsfc_rpc_endpoint_info {
 	u32 endpoint;
 	dma_addr_t operations_pa;
 	struct pds_fwctl_query_data *operations;
+	struct mutex lock;
 };
 
 struct pdsfc_dev {
@@ -61,8 +62,6 @@ struct pdsfc_dev {
 };
 DEFINE_FREE(pdsfc_dev, struct pdsfc_dev *, if (_T) fwctl_put(&_T->fwctl));
 
-int pdsfc_identify(struct pdsfc_dev *pdsfc);
-
 static int pdsfc_open_uctx(struct fwctl_uctx *uctx)
 {
 	struct pdsfc_dev *pdsfc = container_of(uctx->fwctl, struct pdsfc_dev, fwctl);
@@ -72,14 +71,6 @@ static int pdsfc_open_uctx(struct fwctl_uctx *uctx)
 
 	dev_dbg(dev, "%s: caps = 0x%04x\n", __func__, pdsfc->caps);
 	pdsfc_uctx->uctx_caps = pdsfc->caps;
-
-	if (!pdsfc->ident) {
-		ret = pdsfc_identify(pdsfc);
-		if (ret) {
-			dev_err(dev, "Failed to identify device, err %d\n", ret);
-			return ret;
-		}
-	}
 
 	return ret;
 }
@@ -95,9 +86,7 @@ static void *pdsfc_info(struct fwctl_uctx *uctx, size_t *length)
 {
 	struct pdsfc_uctx *pdsfc_uctx = container_of(uctx, struct pdsfc_uctx, uctx);
 	struct fwctl_info_pds *info;
-	struct device *dev = &uctx->fwctl->dev;
 
-	dev_info(dev, "%s: \n", __func__);
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return ERR_PTR(-ENOMEM);
@@ -107,7 +96,7 @@ static void *pdsfc_info(struct fwctl_uctx *uctx, size_t *length)
 	return info;
 }
 
-void pdsfc_free_ident(struct pdsfc_dev *pdsfc)
+static void pdsfc_free_ident(struct pdsfc_dev *pdsfc)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 
@@ -118,7 +107,7 @@ void pdsfc_free_ident(struct pdsfc_dev *pdsfc)
 	}
 }
 
-int pdsfc_identify(struct pdsfc_dev *pdsfc)
+static int pdsfc_identify(struct pdsfc_dev *pdsfc)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 	struct pds_fwctl_ident *ident;
@@ -154,18 +143,24 @@ int pdsfc_identify(struct pdsfc_dev *pdsfc)
 	return 0;
 }
 
-void pdsfc_free_endpoints(struct pdsfc_dev *pdsfc)
+static void pdsfc_free_endpoints(struct pdsfc_dev *pdsfc)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 
 	if (pdsfc->endpoints) {
+		int i;
+
+		for (i = 0; pdsfc->endpoint_info && i < pdsfc->endpoints->num_entries; i++)
+			mutex_destroy(&pdsfc->endpoint_info[i].lock);
+		vfree(pdsfc->endpoint_info);
+		pdsfc->endpoint_info = NULL;
 		dma_free_coherent(dev->parent, PAGE_SIZE, pdsfc->endpoints, pdsfc->endpoints_pa);
 		pdsfc->endpoints = NULL;
 		pdsfc->endpoints_pa = DMA_MAPPING_ERROR;
 	}
 }
 
-void pdsfc_free_operations(struct pdsfc_dev *pdsfc)
+static void pdsfc_free_operations(struct pdsfc_dev *pdsfc)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 	int i;
@@ -179,7 +174,7 @@ void pdsfc_free_operations(struct pdsfc_dev *pdsfc)
 	}
 }
 
-struct pds_fwctl_query_data *pdsfc_get_endpoints(struct pdsfc_dev *pdsfc, dma_addr_t *pa)
+static struct pds_fwctl_query_data *pdsfc_get_endpoints(struct pdsfc_dev *pdsfc, dma_addr_t *pa)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 	struct pds_fwctl_query_data *data;
@@ -190,7 +185,6 @@ struct pds_fwctl_query_data *pdsfc_get_endpoints(struct pdsfc_dev *pdsfc, dma_ad
 	int ret = 0;
 	int i;
 
-	/* Query the endpoint list during probe, operations will be queried as-needed */
 	data = dma_alloc_coherent(dev->parent, PAGE_SIZE, &data_pa, GFP_KERNEL);
 	if (dma_mapping_error(dev, data_pa)) {
 		dev_err(dev, "Failed to map endpoint list\n");
@@ -224,7 +218,35 @@ struct pds_fwctl_query_data *pdsfc_get_endpoints(struct pdsfc_dev *pdsfc, dma_ad
 	return data;
 }
 
-struct pds_fwctl_query_data *pdsfc_get_operations(struct pdsfc_dev *pdsfc, dma_addr_t *pa, u32 ep)
+static int pdsfc_init_endpoints(struct pdsfc_dev *pdsfc)
+{
+	struct pds_fwctl_query_data_endpoint *ep_entry;
+	struct device *dev = &pdsfc->fwctl.dev;
+	int i;
+
+	pdsfc->endpoints = pdsfc_get_endpoints(pdsfc, &pdsfc->endpoints_pa);
+	if (IS_ERR(pdsfc->endpoints)) {
+		dev_err(dev, "Failed to query endpoints\n");
+		return PTR_ERR(pdsfc->endpoints);
+	}
+
+	pdsfc->endpoint_info = vzalloc(pdsfc->endpoints->num_entries * sizeof(*pdsfc->endpoint_info));
+	if (!pdsfc->endpoint_info) {
+		dev_err(dev, "Failed to allocate endpoint_info array\n");
+		pdsfc_free_endpoints(pdsfc);
+		return -ENOMEM;
+	}
+
+	ep_entry = (struct pds_fwctl_query_data_endpoint *)pdsfc->endpoints->entries;
+	for (i = 0; i < pdsfc->endpoints->num_entries; i++) {
+		mutex_init(&pdsfc->endpoint_info[i].lock);
+		pdsfc->endpoint_info[i].endpoint = ep_entry[i].id;
+	}
+
+	return 0;
+}
+
+static struct pds_fwctl_query_data *pdsfc_get_operations(struct pdsfc_dev *pdsfc, dma_addr_t *pa, u32 ep)
 {
 	struct device *dev = &pdsfc->fwctl.dev;
 	struct pds_fwctl_query_data *data;
@@ -253,7 +275,7 @@ struct pds_fwctl_query_data *pdsfc_get_operations(struct pdsfc_dev *pdsfc, dma_a
 	if (ret) {
 		dev_err(dev, "Failed to send adminq cmd\n");
 		dma_free_coherent(dev->parent, PAGE_SIZE, data, data_pa);
-		return ERR_PTR(EIO);
+		return ERR_PTR(-EIO);
 	}
 
 	*pa = data_pa;
@@ -267,10 +289,9 @@ struct pds_fwctl_query_data *pdsfc_get_operations(struct pdsfc_dev *pdsfc, dma_a
 	return data;
 }
 
-int pdsfc_validate_rpc(struct pdsfc_dev *pdsfc, struct fwctl_rpc_pds *rpc)
+static int pdsfc_validate_rpc(struct pdsfc_dev *pdsfc, struct fwctl_rpc_pds *rpc)
 {
 	struct pds_fwctl_query_data_operation *op_entry = NULL;
-	struct pds_fwctl_query_data_endpoint *ep_entry = NULL;
 	struct pdsfc_rpc_endpoint_info *ep_info = NULL;
 	struct device *dev = &pdsfc->fwctl.dev;
 	int ret = -EINVAL;
@@ -281,7 +302,7 @@ int pdsfc_validate_rpc(struct pdsfc_dev *pdsfc, struct fwctl_rpc_pds *rpc)
 		goto done;
 	}
 
-	// validate rpc in_len & out_len based on ident->max_req_sz & max_resp_sz
+	/* validate rpc in_len & out_len based on ident->max_req_sz & max_resp_sz */
 	if (rpc->in.len > pdsfc->ident->max_req_sz) {
 		dev_err(dev, "Invalid request size %u, max %u\n", rpc->in.len, pdsfc->ident->max_req_sz);
 		goto done;
@@ -292,43 +313,26 @@ int pdsfc_validate_rpc(struct pdsfc_dev *pdsfc, struct fwctl_rpc_pds *rpc)
 		goto done;
 	}
 
-	// search the array of endpoints to validate ep
-	if (!pdsfc->endpoints) {
-		pdsfc->endpoints = pdsfc_get_endpoints(pdsfc, &pdsfc->endpoints_pa);
-		if (IS_ERR(pdsfc->endpoints)) {
-			dev_err(dev, "Failed to query endpoints\n");
-			ret = PTR_ERR(pdsfc->endpoints);
-			goto done;
-		}
-		pdsfc->endpoint_info = vzalloc(pdsfc->endpoints->num_entries * sizeof(*pdsfc->endpoint_info));
-		if (!pdsfc->endpoint_info) {
-			dev_err(dev, "Failed to allocate endpoint_info array\n");
-			ret = -ENOMEM;
-			goto done;
-		}
-		ep_entry = (struct pds_fwctl_query_data_endpoint *)pdsfc->endpoints->entries;
-		for (i = 0; i < pdsfc->endpoints->num_entries; i++) {
-			pdsfc->endpoint_info[i].endpoint = ep_entry[i].id;
-		}
-	}
-
-	// find the endpoint in endpoint_info array
 	for (i = 0; i < pdsfc->endpoints->num_entries; i++) {
 		ep_info = &pdsfc->endpoint_info[i];
 		if (ep_info->endpoint != rpc->in.ep) {
 			continue;
 		}
-		// query the operations for this endpoint
+
+		mutex_lock(&ep_info->lock);
+		/* query and cache this endpoint's operations */
 		if (!ep_info->operations) {
 			ep_info->operations = pdsfc_get_operations(pdsfc,
 				&ep_info->operations_pa, rpc->in.ep);
 			if (!ep_info->operations) {
+				mutex_unlock(&ep_info->lock);
 				dev_err(dev, "Failed to allocate operations list\n");
 				ret = -ENOMEM;
 				goto done;
 			}
 		}
-		// find the operation in the operations list
+		mutex_unlock(&ep_info->lock);
+
 		op_entry = (struct pds_fwctl_query_data_operation *)ep_info->operations->entries;
 		for (j = 0; j < ep_info->operations->num_entries; j++) {
 			if (PDS_FWCTL_RPC_OPCODE_CMP(rpc->in.op, op_entry[j].id)) {
@@ -487,6 +491,8 @@ static int pdsfc_probe(struct auxiliary_device *adev,
 	struct device *dev = &adev->dev;
 	int ret = 0;
 
+	dev_dbg(dev, "%s\n", __func__);
+
 	padev = container_of(adev, struct pds_auxiliary_dev, aux_dev);
 	pdsfc = fwctl_alloc_device(&padev->vf_pdev->dev, &pdsfc_ops, struct pdsfc_dev, fwctl);
 	if (!pdsfc) {
@@ -495,16 +501,34 @@ static int pdsfc_probe(struct auxiliary_device *adev,
 	}
 	pdsfc->padev = padev;
 
+	ret = pdsfc_identify(pdsfc);
+	if (ret) {
+		dev_err(dev, "Failed to identify device, err %d\n", ret);
+		return ret;
+	}
+
+	ret = pdsfc_init_endpoints(pdsfc);
+	if (ret) {
+		dev_err(dev, "Failed to init endpoints, err %d\n", ret);
+		goto free_ident;
+	}
+
 	ret = fwctl_register(&pdsfc->fwctl);
 	if (ret) {
 		dev_err(dev, "Failed to register device, err %d\n", ret);
-		return ret;
+		goto free_endpoints;
 	}
 	auxiliary_set_drvdata(adev, no_free_ptr(pdsfc));
 
-	dev_info(dev, "Loaded\n");
+	dev_dbg(dev, "Loaded\n");
 
 	return 0;
+
+free_endpoints:
+	pdsfc_free_endpoints(pdsfc);
+free_ident:
+	pdsfc_free_ident(pdsfc);
+	return ret;
 }
 
 static void pdsfc_remove(struct auxiliary_device *adev)
@@ -512,15 +536,14 @@ static void pdsfc_remove(struct auxiliary_device *adev)
 	struct pdsfc_dev *pdsfc  __free(pdsfc_dev) = auxiliary_get_drvdata(adev);
 	struct device *dev = &adev->dev;
 
-	dev_info(dev, "%s: \n", __func__);
+	dev_dbg(dev, "%s\n", __func__);
 
 	fwctl_unregister(&pdsfc->fwctl);
-	// TODO: cleanup
-	// pdsfc_free_operations(pdsfc);
-	// pdsfc_free_endpoints(pdsfc);
+	pdsfc_free_operations(pdsfc);
+	pdsfc_free_endpoints(pdsfc);
 	pdsfc_free_ident(pdsfc);
  
-	dev_info(dev, "Removed\n");
+	dev_dbg(dev, "Removed\n");
 }
 
 static const struct auxiliary_device_id pdsfc_id_table[] = {
