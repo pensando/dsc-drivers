@@ -1,0 +1,27 @@
+KSRC ?= /lib/modules/$(shell uname -r)/build
+CURDIR=$(shell pwd)
+
+KCFLAGS="-I$(CURDIR)/include"
+
+ALL = pds_core pds_vfio_pci pds_vdpa pds_fwctl
+all:	$(ALL)
+
+pds_core:
+	$(MAKE) -C $(KSRC) KCFLAGS=$(KCFLAGS) M=$(CURDIR)/core "CONFIG_PDS_CORE=m"
+
+pds_vfio_pci:
+	$(MAKE) -C $(KSRC) KCFLAGS=$(KCFLAGS) M=$(CURDIR)/vfio "CONFIG_PDS_VFIO_PCI=m"
+
+pds_vdpa:
+	$(MAKE) -C $(KSRC) KCFLAGS=$(KCFLAGS) M=$(CURDIR)/vdpa "CONFIG_PDS_VDPA=m"
+
+pds_fwctl:
+	$(MAKE) -C $(KSRC) KCFLAGS=$(KCFLAGS) M=$(CURDIR)/fwctl "CONFIG_FWCTL_PDS=m"
+
+clean:
+	$(MAKE) -C $(KSRC) M=$(CURDIR)/core clean
+	$(MAKE) -C $(KSRC) M=$(CURDIR)/vfio clean
+	$(MAKE) -C $(KSRC) M=$(CURDIR)/vdpa clean
+	$(MAKE) -C $(KSRC) M=$(CURDIR)/fwctl clean
+
+.PHONY: all pds_core pds_vfio_pci pds_vdpa pds_fwctl clean
