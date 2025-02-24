@@ -47,11 +47,6 @@ unsigned long asic_addr_len = IONIC_ADDR_LEN;
 module_param(asic_addr_len, ulong, 0600);
 MODULE_PARM_DESC(asic_addr_len, "DMA address bits for mask size");
 
-// TODO: remove this -- short term override for expdb feature negotiation
-bool expdb_en;
-module_param(expdb_en, bool, 0600);
-MODULE_PARM_DESC(expdb_en, "Override expdb feature negotiation");
-
 static const char *ionic_error_to_str(enum ionic_status_code code)
 {
 	switch (code) {

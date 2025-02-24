@@ -215,6 +215,10 @@ u8 ionic_api_get_expdb(void *handle)
 		ret |= IONIC_EXPDB_64B_WQE;
 	if (lif->ionic->idev.phy_cmb_expdb128_pages)
 		ret |= IONIC_EXPDB_128B_WQE;
+	if (lif->ionic->idev.phy_cmb_expdb256_pages)
+		ret |= IONIC_EXPDB_256B_WQE;
+	if (lif->ionic->idev.phy_cmb_expdb512_pages)
+		ret |= IONIC_EXPDB_512B_WQE;
 
 	return ret;
 }

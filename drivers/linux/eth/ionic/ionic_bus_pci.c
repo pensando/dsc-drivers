@@ -498,7 +498,8 @@ static void ionic_remove(struct pci_dev *pdev)
 	ionic_devlink_free(ionic);
 }
 
-void ionic_reset_prepare(struct pci_dev *pdev)
+#if (KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE)
+static void ionic_reset_prepare(struct pci_dev *pdev)
 {
 	struct ionic *ionic = pci_get_drvdata(pdev);
 	struct ionic_lif *lif = ionic->lif;
@@ -516,6 +517,7 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	del_timer_sync(&ionic->watchdog_timer);
 	cancel_work_sync(&lif->deferred.work);
 
+	ionic_auxbus_unregister(ionic->lif);
 	mutex_lock(&lif->queue_lock);
 	ionic_stop_queues_reconfig(lif);
 	ionic_txrx_free(lif);
@@ -530,7 +532,7 @@ void ionic_reset_prepare(struct pci_dev *pdev)
 	clear_bit(IONIC_LIF_F_FW_STOPPING, lif->state);
 }
 
-void ionic_reset_done(struct pci_dev *pdev)
+static void ionic_reset_done(struct pci_dev *pdev)
 {
 	struct ionic *ionic = pci_get_drvdata(pdev);
 	struct ionic_lif *lif = ionic->lif;
@@ -554,7 +556,6 @@ err_out:
 		__func__, err ? "failed" : "done");
 }
 
-#if (KERNEL_VERSION(4, 13, 0) <= LINUX_VERSION_CODE)
 static pci_ers_result_t ionic_pci_error_detected(struct pci_dev *pdev,
 						 pci_channel_state_t error)
 {

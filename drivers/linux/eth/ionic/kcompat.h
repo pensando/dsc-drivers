@@ -6917,9 +6917,7 @@ static inline int _kc_devlink_register(struct devlink *devlink, struct device *d
 #endif /* 6.3 */
 
 /*****************************************************************************/
-#if (KERNEL_VERSION(6, 5, 0) > LINUX_VERSION_CODE && \
-	(!RHEL_RELEASE_CODE || \
-	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 4)))
+#ifndef IONIC_HAVE_SKB_FRAG_FILL_PD
 #ifdef HAVE_NET_XDP_FRAGS
 static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 					   struct page *page,
@@ -6930,7 +6928,7 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 	skb_frag_size_set(frag, size);
 }
 #endif /* HAVE_NET_XDP_FRAGS */
-#endif /* 6.5.0 */
+#endif /* IONIC_HAVE_SKB_FRAG_FILL_PD */
 
 /*****************************************************************************/
 #if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
@@ -6953,21 +6951,8 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 #undef CONFIG_PTP_1588_CLOCK_MODULE
 #endif
 
-#if GCC_VERSION < 70100 || \
-	(SLE_VERSION_CODE && (SLE_VERSION_CODE < SLE_VERSION(15, 3, 0)))  || \
-	(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 0)   || \
-			       RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 1)))
+#ifndef fallthrough
 # define fallthrough                    do {} while (0)  /* fallthrough */
-#endif
-
-/*****************************************************************************/
-#if (KERNEL_VERSION(6, 9, 0) < LINUX_VERSION_CODE)
-#define HAVE_DEVLINK_EXTRACT_PARAM
-#endif
-
-/*****************************************************************************/
-#if (KERNEL_VERSION(6, 11, 0) <= LINUX_VERSION_CODE)
-#define HAVE_KERNEL_ETHTOOL_TS_INFO
 #endif
 
 /*****************************************************************************/
