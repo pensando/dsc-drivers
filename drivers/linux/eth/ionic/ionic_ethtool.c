@@ -30,8 +30,6 @@ enum {
 static const char ionic_priv_flags_strings[][ETH_GSTRING_LEN] = {
 #define IONIC_PRIV_F_RDMA_SNIFFER	BIT(0)
 	"rdma-sniffer",
-#define IONIC_PRIV_F_DEVICE_RESET	BIT(1)
-	"device-reset",
 #define IONIC_PRIV_F_CMB_RINGS		BIT(2)
 	"cmb-rings",
 
@@ -1067,6 +1065,25 @@ static int ionic_set_channels(struct net_device *netdev,
 	return err;
 }
 
+static int ionic_get_rxnfc(struct net_device *netdev,
+			   struct ethtool_rxnfc *info, u32 *rules)
+{
+	struct ionic_lif *lif = netdev_priv(netdev);
+	int err = 0;
+
+	switch (info->cmd) {
+	case ETHTOOL_GRXRINGS:
+		info->data = lif->nxqs;
+		break;
+	default:
+		netdev_dbg(netdev, "Command parameter %d is not supported\n",
+			   info->cmd);
+		err = -EOPNOTSUPP;
+	}
+
+	return err;
+}
+
 static u32 ionic_get_priv_flags(struct net_device *netdev)
 {
 	struct ionic_lif *lif = netdev_priv(netdev);
@@ -1091,11 +1108,6 @@ static int ionic_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 	bool cmb_req;
 	int rdma;
 	int ret;
-
-	if (priv_flags & IONIC_PRIV_F_DEVICE_RESET) {
-		ionic_reset_prepare(lif->ionic->pdev);
-		ionic_reset_done(lif->ionic->pdev);
-	}
 
 	clear_bit(IONIC_LIF_F_SW_DEBUG_STATS, lif->state);
 	if (priv_flags & IONIC_PRIV_F_SW_DBG_STATS)
@@ -1254,9 +1266,12 @@ static int ionic_get_module_info(struct net_device *netdev,
 		break;
 	case SFF8024_ID_QSFP_8436_8636:
 	case SFF8024_ID_QSFP28_8636:
-	case SFF8024_ID_QSFP_PLUS_CMIS:
 		modinfo->type = ETH_MODULE_SFF_8436;
 		modinfo->eeprom_len = ETH_MODULE_SFF_8436_LEN;
+		break;
+	case SFF8024_ID_QSFP_PLUS_CMIS:
+		modinfo->type = ETH_MODULE_SFF_8472;
+		modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
 		break;
 	case SFF8024_ID_UNK:
 		if (lif->ionic->is_mgmt_nic)
@@ -1276,29 +1291,20 @@ static int ionic_get_module_info(struct net_device *netdev,
 	return 0;
 }
 
-static int ionic_get_module_eeprom(struct net_device *netdev,
-				   struct ethtool_eeprom *ee,
-				   u8 *data)
+static int ionic_do_module_copy(u8 *dst, u8 *src, u32 len)
 {
-	struct ionic_lif *lif = netdev_priv(netdev);
-	struct ionic_dev *idev = &lif->ionic->idev;
-	struct ionic_xcvr_status *xcvr;
-	char tbuf[sizeof(xcvr->sprom)];
+	char tbuf[sizeof_field(struct ionic_xcvr_status, sprom)];
 	int count = 10;
-	u32 len;
 
 	/* The NIC keeps the module prom up-to-date in the DMA space
 	 * so we can simply copy the module bytes into the data buffer.
 	 */
-	xcvr = &idev->port_info->status.xcvr;
-	len = min_t(u32, sizeof(xcvr->sprom), ee->len);
-
 	do {
-		memcpy(data, &xcvr->sprom[ee->offset], len);
-		memcpy(tbuf, &xcvr->sprom[ee->offset], len);
+		memcpy(dst, src, len);
+		memcpy(tbuf, src, len);
 
 		/* Let's make sure we got a consistent copy */
-		if (!memcmp(data, tbuf, len))
+		if (!memcmp(dst, tbuf, len))
 			break;
 
 	} while (--count);
@@ -1309,8 +1315,113 @@ static int ionic_get_module_eeprom(struct net_device *netdev,
 	return 0;
 }
 
+static int ionic_get_module_eeprom(struct net_device *netdev,
+				   struct ethtool_eeprom *ee,
+				   u8 *data)
+{
+	struct ionic_lif *lif = netdev_priv(netdev);
+	struct ionic_dev *idev = &lif->ionic->idev;
+	u32 start = ee->offset;
+	u32 err = -EINVAL;
+	u32 size = 0;
+	u8 *src;
+
+	/* Read A0 section */
+	if (start < ETH_MODULE_SFF_8079_LEN) {
+		/* Limit transfer size to the A0 section boundary */
+		if (start + ee->len > ETH_MODULE_SFF_8079_LEN)
+			size = ETH_MODULE_SFF_8079_LEN - start;
+		else
+			size = ee->len;
+
+		src = &idev->port_info->status.xcvr.sprom[start];
+		err = ionic_do_module_copy(data, src, size);
+		if (err)
+			return err;
+
+		data += size;
+		start += size;
+	}
+
+	/* Read A2 section */
+	if (start >= ETH_MODULE_SFF_8079_LEN &&
+	    start < ETH_MODULE_SFF_8472_LEN) {
+		size = ee->len - size;
+		/* Limit transfer size to the A2 section boundary */
+		if (start + size > ETH_MODULE_SFF_8472_LEN)
+			size = ETH_MODULE_SFF_8472_LEN - start;
+
+		start -= ETH_MODULE_SFF_8079_LEN;
+		src = &idev->port_info->sprom_epage[start];
+		err = ionic_do_module_copy(data, src, size);
+		if (err)
+			return err;
+	}
+
+	return err;
+}
+
+#ifdef IONIC_HAVE_MODULE_EEPROM_BY_PAGE
+static int ionic_get_module_eeprom_by_page(struct net_device *netdev,
+					   const struct ethtool_module_eeprom *page_data,
+					   struct netlink_ext_ack *extack)
+{
+	struct ionic_lif *lif = netdev_priv(netdev);
+	struct ionic_dev *idev = &lif->ionic->idev;
+	u32 err = -EINVAL;
+	u8 *src;
+
+	if (!page_data->length)
+		return -EINVAL;
+
+	if (page_data->bank != 0) {
+		NL_SET_ERR_MSG_MOD(extack, "Only bank 0 is supported");
+		return -EINVAL;
+	}
+
+	memset(page_data->data, 0, page_data->length);
+
+	if (page_data->page == 0 &&
+	    (page_data->length + page_data->offset) <= 256) {
+		src = &idev->port_info->status.xcvr.sprom[page_data->offset];
+		err = ionic_do_module_copy(page_data->data, src, page_data->length);
+		return page_data->length;
+	}
+
+	if (page_data->offset < 128) {
+		NL_SET_ERR_MSG_MOD(extack, "High side only for pages other than 0");
+		return -EINVAL;
+	}
+
+	if ((page_data->length + page_data->offset) > 256) {
+		NL_SET_ERR_MSG_MOD(extack, "Read passed the end of the page");
+		return -EINVAL;
+	}
+
+	if (page_data->page == 1) {
+		src = &idev->port_info->sprom_page1[page_data->offset - 128];
+		err = ionic_do_module_copy(page_data->data, src, page_data->length);
+		return page_data->length;
+	}
+
+	if (page_data->page == 2) {
+		src = &idev->port_info->sprom_page2[page_data->offset - 128];
+		err = ionic_do_module_copy(page_data->data, src, page_data->length);
+		return page_data->length;
+	}
+
+	if (page_data->page == 0x11) {
+		src = &idev->port_info->sprom_page17[page_data->offset - 128];
+		err = ionic_do_module_copy(page_data->data, src, page_data->length);
+		return page_data->length;
+	}
+
+	return err;
+}
+#endif /* IONIC_HAVE_MODULE_EEPROM_BY_PAGE */
+
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
-#ifdef HAVE_KERNEL_ETHTOOL_TS_INFO
+#ifdef IONIC_HAVE_KERNEL_ETHTOOL_TS_INFO
 static int ionic_get_ts_info(struct net_device *netdev,
 			     struct kernel_ethtool_ts_info *info)
 #else
@@ -1479,6 +1590,7 @@ static const struct ethtool_ops ionic_ethtool_ops = {
 	.get_sset_count		= ionic_get_sset_count,
 	.get_priv_flags		= ionic_get_priv_flags,
 	.set_priv_flags		= ionic_set_priv_flags,
+	.get_rxnfc		= ionic_get_rxnfc,
 	.get_rxfh_indir_size	= ionic_get_rxfh_indir_size,
 	.get_rxfh_key_size	= ionic_get_rxfh_key_size,
 	.get_rxfh		= ionic_get_rxfh,
@@ -1487,6 +1599,9 @@ static const struct ethtool_ops ionic_ethtool_ops = {
 	.set_tunable		= ionic_set_tunable,
 	.get_module_info	= ionic_get_module_info,
 	.get_module_eeprom	= ionic_get_module_eeprom,
+#ifdef IONIC_HAVE_MODULE_EEPROM_BY_PAGE
+	.get_module_eeprom_by_page	= ionic_get_module_eeprom_by_page,
+#endif
 	.get_pauseparam		= ionic_get_pauseparam,
 	.set_pauseparam		= ionic_set_pauseparam,
 #ifdef ETHTOOL_FEC_NONE

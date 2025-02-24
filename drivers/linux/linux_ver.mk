@@ -255,3 +255,10 @@ endif
 endef
 minimum_kver_check = $(eval $(call _minimum_kver_check,${1},${2},${3}))
 
+####################
+#  check for clang #
+####################
+CONFIG_CC_VERSION_TEXT:=$(call get_config_value,CONFIG_CC_VERSION_TEXT)
+ifeq ($(findstring clang, ${CONFIG_CC_VERSION_TEXT}),clang)
+  LLVM=1
+endif

@@ -207,79 +207,166 @@ void ionic_init_devinfo(struct ionic *ionic)
 	dev_dbg(ionic->dev, "fw_version %s\n", idev->dev_info.fw_version);
 }
 
-static dma_addr_t ionic_map_cmb_entry(struct ionic_dev_bar *bar, unsigned long offset)
+void ionic_map_disc_cmb(struct ionic *ionic)
 {
-	/* Is BAR large enough to accommodate this entry? */
-	if (bar->len < offset + IONIC_BAR2_CMB_ENTRY_SIZE)
-		return 0;
+	struct ionic_identity *ident = &ionic->ident;
+	struct ionic_dev_bar *bar = ionic->bars;
+	struct ionic_dev *idev = &ionic->idev;
+	struct device *dev = ionic->dev;
+	int err, sz, i;
+	u32 length;
 
-	return bar->bus_addr + offset;
+	mutex_lock(&ionic->dev_cmd_lock);
+
+	ionic_dev_cmd_discover_cmb(idev);
+	err = ionic_dev_cmd_wait(ionic, DEVCMD_TIMEOUT);
+	sz = min(sizeof(ident->cmb_layout), sizeof(idev->dev_cmd_regs->data));
+	memcpy_fromio(&ident->cmb_layout, &idev->dev_cmd_regs->data, sz);
+	mutex_unlock(&ionic->dev_cmd_lock);
+	if (err) {
+		dev_warn(dev, "Cannot discover CMB layout, disabling CMB\n");
+		return;
+	}
+
+	bar += 2;
+
+	if (!(ident->cmb_layout.num_regions) ||
+	    ident->cmb_layout.num_regions > IONIC_MAX_CMB_REGIONS) {
+		dev_warn(dev, "Invalid number of CMB entries (%d)\n",
+			 ident->cmb_layout.num_regions);
+		return;
+	}
+
+	dev_dbg(dev, "ionic_cmb_layout_identity num_regions %d flags %x:\n",
+		ident->cmb_layout.num_regions, ident->cmb_layout.flags);
+
+	if (!(ident->cmb_layout.flags & IONIC_CMB_FLAG_EXPDB)) {
+		dev_warn(dev, "CMB layout has no express doorbell, disabling CMB\n");
+		return;
+	}
+
+	for (i = 0; i < ident->cmb_layout.num_regions; i++)
+		dev_dbg(dev, "CMB entry %d: bar_num %u cmb_type %u offset %x length %u\n",
+			i, ident->cmb_layout.region[i].bar_num,
+			ident->cmb_layout.region[i].cmb_type,
+			ident->cmb_layout.region[i].offset,
+			ident->cmb_layout.region[i].length);
+
+	/* if first entry matches PCI config expdb is not supported */
+	if (ident->cmb_layout.region[0].bar_num == bar->res_index &&
+	    ident->cmb_layout.region[0].length == bar->len &&
+	    ident->cmb_layout.region[0].offset == 0) {
+		dev_warn(dev, "No CMB mapping discovered\n");
+		return;
+	}
+
+	/* process first entry for regular mapping */
+	if (ident->cmb_layout.region[0].length == 0) {
+		dev_warn(dev, "No CMB mapping discovered\n");
+		return;
+	}
+
+	/* Verify first entry size matches expected 8MB size (in 64KB pages) */
+	length = ident->cmb_layout.region[0].length;
+	if (length != IONIC_BAR2_CMB_ENTRY_SIZE >> 16) {
+		dev_warn(dev, "Unexpected CMB size in entry 0: %u pages\n", length);
+		return;
+	}
+
+	sz = BITS_TO_LONGS((length << 16) / PAGE_SIZE) * sizeof(long);
+	idev->cmb_inuse = kzalloc(sz, GFP_KERNEL);
+	if (!idev->cmb_inuse) {
+		dev_warn(dev, "No memory for CMB, disabling\n");
+		idev->phy_cmb_pages = 0;
+		idev->phy_cmb_expdb64_pages = 0;
+		idev->phy_cmb_expdb128_pages = 0;
+		idev->phy_cmb_expdb256_pages = 0;
+		idev->phy_cmb_expdb512_pages = 0;
+		idev->cmb_npages = 0;
+		return;
+	}
+
+	for (i = 0; i < ident->cmb_layout.num_regions; i++) {
+		if (ident->cmb_layout.region[i].length != length)
+			continue;
+
+		switch (ident->cmb_layout.region[i].cmb_type) {
+		case IONIC_CMB_TYPE_DEVMEM:
+			idev->phy_cmb_pages = bar->bus_addr + ident->cmb_layout.region[i].offset;
+			idev->cmb_npages = (length << 16) / PAGE_SIZE;
+			dev_dbg(dev, "regular cmb mapping: bar->bus_addr %pa ident->cmb_layout.region[i].length %u\n",
+				&bar->bus_addr, ident->cmb_layout.region[0].length);
+			dev_dbg(dev, "idev->phy_cmb_pages %pad, idev->cmb_npages %u\n",
+				&idev->phy_cmb_pages, idev->cmb_npages);
+			break;
+
+		case IONIC_CMB_TYPE_EXPDB64:
+			idev->phy_cmb_expdb64_pages = bar->bus_addr +
+				(ident->cmb_layout.region[i].offset << 16);
+			dev_dbg(dev, "idev->phy_cmb_expdb64_pages %pad\n",
+				&idev->phy_cmb_expdb64_pages);
+			break;
+
+		case IONIC_CMB_TYPE_EXPDB128:
+			idev->phy_cmb_expdb128_pages = bar->bus_addr +
+				(ident->cmb_layout.region[i].offset << 16);
+			dev_dbg(dev, "idev->phy_cmb_expdb128_pages %pad\n",
+				&idev->phy_cmb_expdb128_pages);
+			break;
+
+		case IONIC_CMB_TYPE_EXPDB256:
+			idev->phy_cmb_expdb256_pages = bar->bus_addr +
+				(ident->cmb_layout.region[i].offset << 16);
+			dev_dbg(dev, "idev->phy_cmb_expdb256_pages %pad\n",
+				&idev->phy_cmb_expdb256_pages);
+			break;
+
+		case IONIC_CMB_TYPE_EXPDB512:
+			idev->phy_cmb_expdb512_pages = bar->bus_addr +
+				(ident->cmb_layout.region[i].offset << 16);
+			dev_dbg(dev, "idev->phy_cmb_expdb512_pages %pad\n",
+				&idev->phy_cmb_expdb512_pages);
+			break;
+
+		default:
+			dev_warn(dev, "Invalid cmb_type (%d)\n",
+				 ident->cmb_layout.region[i].cmb_type);
+			break;
+		}
+	}
 }
 
-void ionic_map_cmb(struct ionic *ionic)
+void ionic_map_classic_cmb(struct ionic *ionic)
 {
 	struct ionic_dev_bar *bar = ionic->bars;
 	struct ionic_dev *idev = &ionic->idev;
 	struct device *dev = ionic->dev;
-	int size;
+	int sz;
 
-	bar += 2;
-	// TODO: undo this -- short term override for expdb feature negotiation
-	// (ionic->ident.dev.capabilities & cpu_to_le64(IONIC_DEV_CAP_DISC_CMB))
-	if (expdb_en) {
-		/* expdb through multiple mappings
-		 * TODO:read FW multiple mapping info with devcmd
-		 *	when available. For now hardcode 3 mappings
-		 *	(all with fixed 8MB offset): classic, 64 and
-		 *	128B mapping
-		 */
+	dev_dbg(dev, "no_cmb_disc\n");
+	/* classic CMB mapping */
+	idev->phy_cmb_pages = bar->bus_addr;
+	idev->cmb_npages = bar->len / PAGE_SIZE;
+	dev_dbg(dev, "classic cmb mapping: bar->bus_addr %pa bar->len %lu\n",
+		&bar->bus_addr, bar->len);
+	dev_dbg(dev, "idev->phy_cmb_pages %pad, idev->cmb_npages %u\n",
+		&idev->phy_cmb_pages, idev->cmb_npages);
 
-		/* classic CMB mapping */
-		idev->phy_cmb_pages = bar->bus_addr;
-		idev->cmb_npages = (bar->len / 8) / PAGE_SIZE;
-		dev_dbg(dev, "classic cmb mapping: bar->bus_addr %pa bar->len %lu\n",
-			&bar->bus_addr, bar->len);
-		dev_dbg(dev, "idev->phy_cmb_pages %pad, idev->cmb_npages %u\n",
-			&idev->phy_cmb_pages, idev->cmb_npages);
-
-		size = BITS_TO_LONGS(idev->cmb_npages) * sizeof(long);
-		idev->cmb_inuse = kzalloc(size, GFP_KERNEL);
-		if (!idev->cmb_inuse) {
-			dev_warn(dev, "No memory for CMB, disabling\n");
-			idev->phy_cmb_pages = 0;
-			idev->phy_cmb_expdb64_pages = 0;
-			idev->phy_cmb_expdb128_pages = 0;
-			idev->cmb_npages = 0;
-		} else {
-			/* expdb 64B WQE mapping */
-			idev->phy_cmb_expdb64_pages =
-				ionic_map_cmb_entry(bar, IONIC_BAR2_CMB_ENTRY_64B_OFFSET);
-			dev_dbg(dev, "expdb mapping idev->phy_cmb_expdb64_pages %pad\n",
-				&idev->phy_cmb_expdb64_pages);
-
-			/* expdb 128B WQE mapping */
-			idev->phy_cmb_expdb128_pages =
-				ionic_map_cmb_entry(bar, IONIC_BAR2_CMB_ENTRY_128B_OFFSET);
-			dev_dbg(dev, "expdb mapping idev->phy_cmb_expdb128_pages %pad\n",
-				&idev->phy_cmb_expdb128_pages);
-		}
-	} else {
-		/* classic CMB mapping */
-		idev->phy_cmb_pages = bar->bus_addr;
-		idev->cmb_npages = bar->len / PAGE_SIZE;
-		dev_dbg(dev, "classic cmb mapping: bar->bus_addr %pa bar->len %lu\n",
-			&bar->bus_addr, bar->len);
-		dev_dbg(dev, "idev->phy_cmb_pages %pad, idev->cmb_npages %u\n",
-			&idev->phy_cmb_pages, idev->cmb_npages);
-
-		size = BITS_TO_LONGS(idev->cmb_npages) * sizeof(long);
-		idev->cmb_inuse = kzalloc(size, GFP_KERNEL);
-		if (!idev->cmb_inuse) {
-			dev_warn(dev, "No memory for CMB, disabling\n");
-			idev->phy_cmb_pages = 0;
-			idev->cmb_npages = 0;
-		}
+	sz = BITS_TO_LONGS(idev->cmb_npages) * sizeof(long);
+	idev->cmb_inuse = kzalloc(sz, GFP_KERNEL);
+	if (!idev->cmb_inuse) {
+		dev_warn(dev, "No memory for CMB, disabling\n");
+		idev->phy_cmb_pages = 0;
+		idev->cmb_npages = 0;
 	}
+}
+
+void ionic_map_cmb(struct ionic *ionic)
+{
+	if (ionic->ident.dev.capabilities & cpu_to_le64(IONIC_DEV_CAP_DISC_CMB))
+		ionic_map_disc_cmb(ionic);
+	else
+		ionic_map_classic_cmb(ionic);
 }
 
 int ionic_dev_setup(struct ionic *ionic)
@@ -356,6 +443,8 @@ void ionic_dev_teardown(struct ionic *ionic)
 
 	idev->phy_cmb_expdb64_pages = 0;
 	idev->phy_cmb_expdb128_pages = 0;
+	idev->phy_cmb_expdb256_pages = 0;
+	idev->phy_cmb_expdb512_pages = 0;
 
 	if (ionic->wq) {
 		destroy_workqueue(ionic->wq);
@@ -789,6 +878,15 @@ void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 	ionic_dev_cmd_go(idev, &cmd);
 }
 
+void ionic_dev_cmd_discover_cmb(struct ionic_dev *idev)
+{
+	union ionic_dev_cmd cmd = {
+		.discover_cmb.opcode = IONIC_CMD_DISCOVER_CMB,
+	};
+
+	ionic_dev_cmd_go(idev, &cmd);
+}
+
 int ionic_db_page_num(struct ionic_lif *lif, int pid)
 {
 	return (lif->hw_index * lif->dbid_count) + pid;
@@ -818,6 +916,14 @@ int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr,
 			*expdb = true;
 	} else if (idev->phy_cmb_expdb128_pages && stride_log2 == IONIC_EXPDB_128B_WQE_LG2) {
 		*pgaddr = idev->phy_cmb_expdb128_pages + ret * PAGE_SIZE;
+		if (expdb)
+			*expdb = true;
+	} else if (idev->phy_cmb_expdb256_pages && stride_log2 == IONIC_EXPDB_256B_WQE_LG2) {
+		*pgaddr = idev->phy_cmb_expdb256_pages + ret * PAGE_SIZE;
+		if (expdb)
+			*expdb = true;
+	} else if (idev->phy_cmb_expdb512_pages && stride_log2 == IONIC_EXPDB_512B_WQE_LG2) {
+		*pgaddr = idev->phy_cmb_expdb512_pages + ret * PAGE_SIZE;
 		if (expdb)
 			*expdb = true;
 	} else {

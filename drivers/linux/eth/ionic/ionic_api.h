@@ -200,6 +200,8 @@ struct dentry *ionic_api_get_debug_ctx(void *handle);
 
 #define IONIC_EXPDB_64B_WQE	BIT(0)
 #define IONIC_EXPDB_128B_WQE	BIT(1)
+#define IONIC_EXPDB_256B_WQE	BIT(2)
+#define IONIC_EXPDB_512B_WQE	BIT(3)
 /**
  * ionic_api_get_identity() - Get result of device identification
  * @handle:		Handle to lif
@@ -221,8 +223,18 @@ struct ionic_qtype_info {
 	u16 sg_desc_stride;
 };
 
+/** TBD
+ *
+ * TODO: change return type to status, output param for the info
+ * TODO: give me proper doc comments
+ */
 struct ionic_qtype_info ionic_api_get_queue_identity(void *handle,
 						     int qtype);
+
+/** TBD
+ *
+ * TODO: give me proper doc comments
+ */
 u8 ionic_api_get_expdb(void *handle);
 
 /**
