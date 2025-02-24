@@ -230,3 +230,18 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
 
 25-01-16 - add RDMA driver for 25.01.1-001
  - add the AMD/Pensando RDMA auxiliary_device driver
+
+25-02-20 - merge the PDS drivers into the master branch
+ - add pds_core, pds_fwctl, pds_vdpa, pds_vfio_pci drivers
+
+25-02-24 - driver update for 25.02.1-001
+ - updates to ETH and RDMA drivers
+ - ETH:
+   - add ethtool display of eeprom page17 for additional QSFP data
+   - reset handling for auxiliary_device
+ - RDMA:
+   - separate request structs for QP, CQ, MR, and AH
+   - add discoverable CMB sizes
+   - add more expdb size support
+   - other fixes for express doorbell
+

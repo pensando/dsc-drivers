@@ -15,6 +15,7 @@
 #include "ionic_bus.h"
 #include "ionic_dev.h"
 #include "ionic_lif.h"
+#include "ionic_aux.h"
 #include "ionic_txrx.h"
 #include "ionic_ethtool.h"
 #include "ionic_debugfs.h"
@@ -3596,6 +3597,7 @@ static void ionic_lif_handle_fw_down(struct ionic_lif *lif)
 	/* put off the next watchdog if it has been set up */
 	netif_device_detach(lif->netdev);
 
+	ionic_auxbus_unregister(ionic->lif);
 	mutex_lock(&lif->queue_lock);
 	if (test_bit(IONIC_LIF_F_UP, lif->state)) {
 		dev_info(ionic->dev, "Surprise FW stop, stopping queues\n");
@@ -3657,6 +3659,8 @@ int ionic_restart_lif(struct ionic_lif *lif)
 	ionic_link_status_check_request(lif, CAN_SLEEP);
 	netif_device_attach(lif->netdev);
 	ionic_queue_doorbell_check(ionic, IONIC_NAPI_DEADLINE);
+
+	ionic_auxbus_register(ionic->lif);
 
 	return 0;
 

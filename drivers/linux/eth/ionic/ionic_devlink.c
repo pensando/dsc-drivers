@@ -120,7 +120,7 @@ static int ionic_devlink_enable_rdma_get(struct devlink *dl, u32 id,
 	return 0;
 }
 
-#ifdef HAVE_DEVLINK_EXTRACT_PARAM
+#ifdef IONIC_HAVE_DEVLINK_EXT_ACK_PARAM
 static int ionic_devlink_enable_rdma_set(struct devlink *dl, u32 id,
 					 struct devlink_param_gset_ctx *ctx,
 					 struct netlink_ext_ack *extack)
