@@ -14,7 +14,7 @@ struct ionic_lif;
 
 #define IONIC_DRV_NAME		"ionic"
 #define IONIC_DRV_DESCRIPTION	"Pensando Ethernet NIC Driver"
-#define IONIC_DRV_VERSION	"25.01.1-001r"
+#define IONIC_DRV_VERSION	"25.02.1-001"
 
 #define PCI_VENDOR_ID_PENSANDO			0x1dd8
 
@@ -37,9 +37,6 @@ extern unsigned int rx_fill_threshold;
 extern unsigned int tx_budget;
 extern unsigned int devcmd_timeout;
 extern unsigned long affinity_mask_override;
-
-// TODO: remove this -- short term override for expdb feature negotiation
-extern bool expdb_en;
 
 struct ionic_vf {
 	u16	 index;

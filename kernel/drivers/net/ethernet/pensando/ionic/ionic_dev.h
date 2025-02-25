@@ -41,6 +41,8 @@
 
 #define IONIC_EXPDB_64B_WQE_LG2		6
 #define IONIC_EXPDB_128B_WQE_LG2	7
+#define IONIC_EXPDB_256B_WQE_LG2	8
+#define IONIC_EXPDB_512B_WQE_LG2	9
 
 struct ionic_dev_bar {
 	void __iomem *vaddr;
@@ -146,6 +148,10 @@ static_assert(sizeof(struct ionic_vf_setattr_cmd) == 64);
 static_assert(sizeof(struct ionic_vf_setattr_comp) == 16);
 static_assert(sizeof(struct ionic_vf_getattr_cmd) == 64);
 static_assert(sizeof(struct ionic_vf_getattr_comp) == 16);
+
+/* CMB discovery for expdbell */
+static_assert(sizeof(struct ionic_discover_cmb_cmd) == 64);
+static_assert(sizeof(struct ionic_discover_cmb_comp) == 16);
 #endif /* __CHECKER__ */
 
 struct ionic_dev {
@@ -175,6 +181,8 @@ struct ionic_dev {
 
 	dma_addr_t phy_cmb_expdb64_pages;
 	dma_addr_t phy_cmb_expdb128_pages;
+	dma_addr_t phy_cmb_expdb256_pages;
+	dma_addr_t phy_cmb_expdb512_pages;
 
 	u32 port_info_sz;
 	struct ionic_port_info *port_info;
@@ -404,8 +412,12 @@ void ionic_dev_cmd_lif_reset(struct ionic_dev *idev, u16 lif_index);
 void ionic_dev_cmd_adminq_init(struct ionic_dev *idev, struct ionic_qcq *qcq,
 			       u16 lif_index, u16 intr_index);
 
+void ionic_dev_cmd_discover_cmb(struct ionic_dev *idev);
+
 int ionic_db_page_num(struct ionic_lif *lif, int pid);
 
+void ionic_map_disc_cmb(struct ionic *ionic);
+void ionic_map_classic_cmb(struct ionic *ionic);
 void ionic_map_cmb(struct ionic *ionic);
 int ionic_get_cmb(struct ionic_lif *lif, u32 *pgid, phys_addr_t *pgaddr,
 		  int order, u8 stride_log2, bool *expdb);

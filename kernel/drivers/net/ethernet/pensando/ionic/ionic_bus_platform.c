@@ -478,16 +478,6 @@ static int ionic_remove(struct platform_device *pfdev)
 	return 0;
 }
 
-void ionic_reset_prepare(struct pci_dev *pdev)
-{
-	dev_info(&pdev->dev, "reset_prepare not supported\n");
-}
-
-void ionic_reset_done(struct pci_dev *pdev)
-{
-	dev_info(&pdev->dev, "reset_done not supported\n");
-}
-
 static const struct of_device_id mnic_of_match[] = {
 		{.compatible = "pensando,ionic-mnic"},
 			{/* end of table */}
