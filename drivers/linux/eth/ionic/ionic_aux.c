@@ -69,8 +69,9 @@ void ionic_auxbus_unregister(struct ionic_lif *lif)
 {
 	struct auxiliary_device *aux_dev;
 
+	mutex_lock(&lif->adev_lock);
 	if (!lif->ionic_adev)
-		return;
+		goto out;
 
 	aux_dev = &lif->ionic_adev->adev;
 
@@ -80,4 +81,7 @@ void ionic_auxbus_unregister(struct ionic_lif *lif)
 
 	kfree(lif->ionic_adev);
 	lif->ionic_adev = NULL;
+
+out:
+	mutex_unlock(&lif->adev_lock);
 }

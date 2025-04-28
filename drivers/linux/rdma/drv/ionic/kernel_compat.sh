@@ -96,7 +96,8 @@ IONIC_HAVE_IB_REREG_USER_MR_SWAP	memtype		struct_ib_device_ops	rereg_user_mr		in
 IONIC_HAVE_IB_REG_MR_WITH_UATTRS	memtype		struct_ib_device_ops	reg_user_mr_dmabuf	include/rdma/ib_verbs.h		struct ib_mr *(*)(struct ib_pd *, u64, u64, u64, int, int, struct uverbs_attr_bundle *)
 IONIC_HAVE_PORT_ATTR_IP_GIDS		member		struct_ib_port_attr	ip_gids			include/rdma/ib_verbs.h
 IONIC_HAVE_NETDEV_MAX_MTU		member		struct_net_device	max_mtu			include/linux/netdevice.h
-IONIC_HAVE_RDMA_GET_UDP_SPORT		symbol		rdma_get_udp_sport			include/linux/ib_verbs.h
+IONIC_HAVE_RDMA_GET_UDP_SPORT		symbol		rdma_get_udp_sport			include/rdma/ib_verbs.h
+IONIC_HAVE_COUNTER_BIND_PORT		memtype		struct_ib_device_ops	counter_bind_qp		include/rdma/ib_verbs.h		int (*)(struct rdma_counter *counter, struct ib_qp *qp, u32 port)
 " | egrep -v -e '^#' -e '^$' | sed 's/[ \t][ \t]*/:/g'
 }
 

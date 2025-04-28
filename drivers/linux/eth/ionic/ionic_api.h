@@ -223,13 +223,17 @@ struct ionic_qtype_info {
 	u16 sg_desc_stride;
 };
 
-/** TBD
+/**
+ * ionic_api_get_queue_identity() - Get info per queue type
+ * @handle:		Handle to lif
+ * @qtype:		Queue type (enum ionic_logical_qtype)
+ * @qti:		Queue type information returned
  *
- * TODO: change return type to status, output param for the info
- * TODO: give me proper doc comments
+ * Get the queue type info and return it on @qti
+ *
+ * Return: zero on success or negative error status
  */
-struct ionic_qtype_info ionic_api_get_queue_identity(void *handle,
-						     int qtype);
+int ionic_api_get_queue_identity(void *handle, int qtype, struct ionic_qtype_info *qti);
 
 /** TBD
  *

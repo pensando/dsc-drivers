@@ -198,6 +198,20 @@ static inline void ionic_queue_consume(struct ionic_queue *q)
 }
 
 /**
+ * ionic_queue_consume_entries() - Increase the consumer index by entries
+ * @q:				Queue structure
+ * @entries:		Number of entries to increment
+ *
+ * Caller must ensure that the queue is not empty.  It is not checked here.
+ *
+ * This is only valid for to-device queues.
+ */
+static inline void ionic_queue_consume_entries(struct ionic_queue *q, u16 entries)
+{
+	q->cons = (q->cons + entries) & q->mask;
+}
+
+/**
  * ionic_queue_dbell_init() - Initialize doorbell bits for queue id
  * @q:		Queue structure
  * @qid:	Queue identifying number

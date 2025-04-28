@@ -3507,6 +3507,9 @@ int ionic_lif_alloc(struct ionic *ionic)
 	mutex_init(&lif->dbid_inuse_lock);
 
 	spin_lock_init(&lif->adminq_lock);
+#ifdef CONFIG_AUXILIARY_BUS
+	mutex_init(&lif->adev_lock);
+#endif
 
 	spin_lock_init(&lif->deferred.lock);
 	INIT_LIST_HEAD(&lif->deferred.list);
@@ -3564,6 +3567,9 @@ err_out_free_mutex:
 	mutex_destroy(&lif->config_lock);
 	mutex_destroy(&lif->queue_lock);
 	mutex_destroy(&lif->dbid_inuse_lock);
+#ifdef CONFIG_AUXILIARY_BUS
+	mutex_destroy(&lif->adev_lock);
+#endif
 	free_netdev(lif->netdev);
 	lif = NULL;
 err_out_free_lid:
@@ -3758,6 +3764,9 @@ void ionic_lif_free(struct ionic_lif *lif)
 	mutex_destroy(&lif->config_lock);
 	mutex_destroy(&lif->queue_lock);
 	mutex_destroy(&lif->dbid_inuse_lock);
+#ifdef CONFIG_AUXILIARY_BUS
+	mutex_destroy(&lif->adev_lock);
+#endif
 
 	/* free netdev & lif */
 	ionic_debugfs_del_lif(lif);

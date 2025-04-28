@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2017 - 2019 Pensando Systems, Inc
-
-IONIC_ETH_SRC = $(PWD)/eth/ionic
+# SPDX-FileCopyrightText: Copyright (C) 2017-2024 Advanced Micro Devices, Inc.
 
 obj-$(CONFIG_IONIC) := ionic.o
 obj-$(CONFIG_IONIC_MNIC) := ionic_mnic.o
 
-ccflags-y := -g -I$(src)
+ccflags-y := -g -I$(src) $(EXTRA_CFLAGS)
 
 ionic-y := ionic_main.o ionic_bus_pci.o ionic_dev.o ionic_ethtool.o \
 	   ionic_lif.o ionic_rx_filter.o ionic_txrx.o ionic_debugfs.o \
@@ -32,14 +30,12 @@ ifdef CONFIG_AUXILIARY_BUS
 ionic_mnic-y += ionic_aux.o
 endif
 
-ifdef KERNELRELEASE
+srcroot ?= $(src)/../..
+include $(srcroot)/etc/autocompat.mk
+clean-files += autocompat.h* .kpath
 IONIC_AUTOCOMPAT := $(src)/autocompat.h
-
-TOPDIR := $(src)/../..
-include $(TOPDIR)/etc/Makefile.common
 $(addprefix $(obj)/,$(ionic-y)): $(IONIC_AUTOCOMPAT)
 $(addprefix $(obj)/,$(ionic_mnic-y)): $(IONIC_AUTOCOMPAT)
 $(obj)/ionic_sysfs.o: $(IONIC_AUTOCOMPAT)
 $(obj)/ionic_phc.o: $(IONIC_AUTOCOMPAT)
 $(obj)/ionic_phc_weak.o: $(IONIC_AUTOCOMPAT)
-endif

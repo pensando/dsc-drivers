@@ -14,10 +14,12 @@
 #define IONIC_OP(version, opname) \
 	((version) < 2 ? IONIC_V1_OP_##opname : IONIC_V2_OP_##opname)
 
+#ifdef IONIC_NOT_UPSTREAM
 /* Kernel module parameters are not to be upstreamed */
-static bool ionic_xxx_qp_dbell = true;
-module_param_named(xxx_qp_dbell, ionic_xxx_qp_dbell, bool, 0644);
-MODULE_PARM_DESC(xxx_qp_dbell, "XXX Enable ringing qp doorbell (to test handling of dev failure).");
+static bool ionic_qp_dbell = true;
+module_param_named(qp_dbell, ionic_qp_dbell, bool, 0644);
+MODULE_PARM_DESC(qp_dbell, "Enable ringing qp doorbell (to test handling of dev failure).");
+#endif
 
 static bool ionic_next_cqe(struct ionic_ibdev *dev, struct ionic_cq *cq,
 			   struct ionic_v1_cqe **cqe)
@@ -1162,6 +1164,7 @@ static int ionic_prep_reg(struct ionic_qp *qp,
 	struct ionic_mr *mr = to_ionic_mr(wr->mr);
 	struct ionic_sq_meta *meta;
 	struct ionic_v1_wqe *wqe;
+	__le64 dma_addr;
 	int flags;
 
 	if (wr->wr.send_flags & (IB_SEND_SOLICITED | IB_SEND_INLINE))
@@ -1184,7 +1187,8 @@ static int ionic_prep_reg(struct ionic_qp *qp,
 	wqe->reg_mr.va = cpu_to_be64(mr->ibmr.iova);
 	wqe->reg_mr.length = cpu_to_be64(mr->ibmr.length);
 	wqe->reg_mr.offset = ionic_pgtbl_off(&mr->buf, mr->ibmr.iova);
-	wqe->reg_mr.dma_addr = ionic_pgtbl_dma(&mr->buf, mr->ibmr.iova);
+	dma_addr = ionic_pgtbl_dma(&mr->buf, mr->ibmr.iova);
+	wqe->reg_mr.dma_addr = cpu_to_be64(le64_to_cpu(dma_addr));
 
 	wqe->reg_mr.map_count = cpu_to_be32(mr->buf.tbl_pages);
 	wqe->reg_mr.flags = cpu_to_be16(flags);
@@ -1300,9 +1304,13 @@ static void ionic_post_send_cmb(struct ionic_ibdev *dev, struct ionic_qp *qp)
 
 		pos = ionic_queue_next(&qp->sq, pos);
 
-		if (!(qp->sq_cmb & IONIC_CMB_EXPDB) && ionic_xxx_qp_dbell)
-			ionic_dbell_ring(dev->dbpage, dev->sq_qtype,
-					 qp->sq.dbell | pos);
+		if (!(qp->sq_cmb & IONIC_CMB_EXPDB)) {
+#ifdef IONIC_NOT_UPSTREAM
+			if (ionic_qp_dbell)
+#endif
+				ionic_dbell_ring(dev->dbpage, dev->sq_qtype,
+						 qp->sq.dbell | pos);
+		}
 	}
 
 	ionic_stat_add(dev->stats, post_send_cmb,
@@ -1508,9 +1516,12 @@ out:
 
 		if (qp->sq_cmb_ptr)
 			ionic_post_send_cmb(dev, qp);
-		else if (ionic_xxx_qp_dbell)
-			ionic_dbell_ring(dev->dbpage, dev->sq_qtype,
-					 ionic_queue_dbell_val(&qp->sq));
+		else
+#ifdef IONIC_NOT_UPSTREAM
+			if (ionic_qp_dbell)
+#endif
+				ionic_dbell_ring(dev->dbpage, dev->sq_qtype,
+						 ionic_queue_dbell_val(&qp->sq));
 	}
 
 	if (qp->sq_flush) {

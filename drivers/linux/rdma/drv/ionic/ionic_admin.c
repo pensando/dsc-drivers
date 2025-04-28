@@ -10,10 +10,12 @@
 #include "ionic_fw.h"
 #include "ionic_ibdev.h"
 
+#ifdef IONIC_NOT_UPSTREAM
 /* Kernel module parameters are not to be upstreamed */
-static bool ionic_xxx_aq_dbell = true;
-module_param_named(xxx_aq_dbell, ionic_xxx_aq_dbell, bool, 0644);
-MODULE_PARM_DESC(xxx_aq_dbell, "XXX Enable ringing aq doorbell (to test handling of aq failure).");
+static bool ionic_aq_dbell = true;
+module_param_named(aq_dbell, ionic_aq_dbell, bool, 0644);
+MODULE_PARM_DESC(aq_dbell, "Enable ringing aq doorbell (to test handling of aq failure).");
+#endif
 
 #define IONIC_EQ_COUNT_MIN	4
 #define IONIC_AQ_COUNT_MIN	1
@@ -133,7 +135,7 @@ static void ionic_admin_poll_locked(struct ionic_aq *aq)
 	struct ionic_ibdev *dev = aq->dev;
 	struct ionic_cq *cq = &aq->vcq->cq[0];
 	struct ionic_admin_wr *wr, *wr_next;
-	struct ionic_v1_admin_wqe *wqe;
+	u32 wr_strides, avlbl_strides;
 	struct ionic_v1_cqe *cqe;
 	u32 qtf, qid;
 	u8 type;
@@ -142,7 +144,7 @@ static void ionic_admin_poll_locked(struct ionic_aq *aq)
 	if (dev->admin_state >= IONIC_ADMIN_KILLED) {
 		list_for_each_entry_safe(wr, wr_next, &aq->wr_prod, aq_ent) {
 			INIT_LIST_HEAD(&wr->aq_ent);
-			aq->q_wr[wr->status] = NULL;
+			aq->q_wr[wr->status].wr = NULL;
 			wr->status = dev->admin_state;
 			complete_all(&wr->work);
 		}
@@ -191,9 +193,9 @@ static void ionic_admin_poll_locked(struct ionic_aq *aq)
 			goto cq_next;
 		}
 
-		wr = aq->q_wr[aq->q.cons];
+		wr = aq->q_wr[aq->q.cons].wr;
 		if (wr) {
-			aq->q_wr[aq->q.cons] = NULL;
+			aq->q_wr[aq->q.cons].wr = NULL;
 			list_del_init(&wr->aq_ent);
 
 			wr->cqe = *cqe;
@@ -201,7 +203,7 @@ static void ionic_admin_poll_locked(struct ionic_aq *aq)
 			complete_all(&wr->work);
 		}
 
-		ionic_queue_consume(&aq->q);
+		ionic_queue_consume_entries(&aq->q, aq->q_wr[aq->q.cons].wqe_strides);
 
 cq_next:
 		ionic_queue_produce(&cq->q);
@@ -231,29 +233,65 @@ cq_next:
 	if (ionic_queue_empty(&aq->q) && !list_empty(&aq->wr_post))
 		ionic_admin_reset_wdog(aq);
 
-	while (!ionic_queue_full(&aq->q) && !list_empty(&aq->wr_post)) {
-		wqe = ionic_queue_at_prod(&aq->q);
+	if (list_empty(&aq->wr_post))
+		return;
 
-		wr = list_first_entry(&aq->wr_post,
-				      struct ionic_admin_wr, aq_ent);
+	do {
+		u8 *src;
+		int i, src_len;
+		size_t stride_len;
+
+		wr = list_first_entry(&aq->wr_post, struct ionic_admin_wr, aq_ent);
+		wr_strides = (wr->wqe.len + ADMIN_WQE_HDR_LEN +
+			     (ADMIN_WQE_STRIDE - 1)) >> aq->q.stride_log2;
+		avlbl_strides = ionic_queue_length_remaining(&aq->q);
+
+		if (wr_strides > avlbl_strides)
+			break;
 
 		list_move(&wr->aq_ent, &aq->wr_prod);
-
 		wr->status = aq->q.prod;
-		aq->q_wr[aq->q.prod] = wr;
+		aq->q_wr[aq->q.prod].wr = wr;
+		aq->q_wr[aq->q.prod].wqe_strides = wr_strides;
 
-		*wqe = wr->wqe;
+		src_len = wr->wqe.len;
+		src = (uint8_t *)&wr->wqe.cmd;
 
-		ibdev_dbg(&dev->ibdev, "post admin prod %u\n", aq->q.prod);
+		/* First stride */
+		memcpy(ionic_queue_at_prod(&aq->q), &wr->wqe, ADMIN_WQE_HDR_LEN);
+		stride_len = ADMIN_WQE_STRIDE - ADMIN_WQE_HDR_LEN;
+		if (stride_len > src_len)
+			stride_len = src_len;
+		memcpy(((u8 *)ionic_queue_at_prod(&aq->q)) + ADMIN_WQE_HDR_LEN, src, stride_len);
+		ibdev_dbg(&dev->ibdev, "post admin prod %u (%u strides)\n",
+			  aq->q.prod, wr_strides);
 		print_hex_dump_debug("wqe ", DUMP_PREFIX_OFFSET, 16, 1,
 				     ionic_queue_at_prod(&aq->q),
 				     BIT(aq->q.stride_log2), true);
 		ionic_queue_produce(&aq->q);
-	}
 
-	if (old_prod != aq->q.prod && ionic_xxx_aq_dbell)
-		ionic_dbell_ring(dev->dbpage, dev->aq_qtype,
-				 ionic_queue_dbell_val(&aq->q));
+		/* Remaining strides */
+		for (i = stride_len; i < src_len; i += stride_len) {
+			stride_len = ADMIN_WQE_STRIDE;
+
+			if (i + stride_len > src_len)
+				stride_len = src_len - i;
+
+			memcpy(ionic_queue_at_prod(&aq->q), src + i, stride_len);
+			print_hex_dump_debug("wqe ", DUMP_PREFIX_OFFSET, 16, 1,
+					     ionic_queue_at_prod(&aq->q),
+					     BIT(aq->q.stride_log2), true);
+			ionic_queue_produce(&aq->q);
+		}
+	} while (!list_empty(&aq->wr_post));
+
+	if (old_prod != aq->q.prod) {
+#ifdef IONIC_NOT_UPSTREAM
+		if (ionic_aq_dbell)
+#endif
+			ionic_dbell_ring(dev->dbpage, dev->aq_qtype,
+					 ionic_queue_dbell_val(&aq->q));
+	}
 }
 
 static void ionic_admin_dwork(struct work_struct *ws)
@@ -358,7 +396,7 @@ static void ionic_admin_cancel(struct ionic_admin_wr *wr)
 	if (!list_empty(&wr->aq_ent)) {
 		list_del(&wr->aq_ent);
 		if (wr->status != IONIC_ADMIN_POSTED)
-			aq->q_wr[wr->status] = NULL;
+			aq->q_wr[wr->status].wr = NULL;
 	}
 
 	spin_unlock_irqrestore(&aq->lock, irqflags);
@@ -452,10 +490,10 @@ static int ionic_rdma_devcmd(struct ionic_ibdev *dev,
 
 	rc = ionic_api_adminq_post_wait(dev->handle, admin);
 	if (rc)
-		goto err_cmd;
+		return rc;
 
 	rc = ionic_error_to_errno(admin->comp.comp.status);
-err_cmd:
+
 	return rc;
 }
 
@@ -581,8 +619,7 @@ static struct ionic_aq *__ionic_create_rdma_adminq(struct ionic_ibdev *dev,
 
 	spin_lock_init(&aq->lock);
 
-	rc = ionic_queue_init(&aq->q, dev->hwdev, ionic_aq_depth,
-			      sizeof(struct ionic_v1_admin_wqe));
+	rc = ionic_queue_init(&aq->q, dev->hwdev, ionic_aq_depth, ADMIN_WQE_STRIDE);
 	if (rc)
 		goto err_q;
 
