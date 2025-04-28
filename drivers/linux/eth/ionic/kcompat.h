@@ -6896,6 +6896,7 @@ static inline int skb_inner_tcp_all_headers(const struct sk_buff *skb)
 #define devlink_info_driver_name_put(x, y)  0
 #endif
 
+#if IS_ENABLED(CONFIG_NET_DEVLINK)
 #ifndef IONIC_HAVE_VOID_DEVLINK_REGISTER
 #ifndef IONIC_HAVE_DEVLINK_REGISTER_WITH_DEV
 static inline int _kc_devlink_register(struct devlink *devlink, struct device *dev) {
@@ -6903,6 +6904,7 @@ static inline int _kc_devlink_register(struct devlink *devlink, struct device *d
 }
 
 #define devlink_register _kc_devlink_register
+#endif
 #endif
 #endif
 
@@ -6959,5 +6961,9 @@ static inline void skb_frag_fill_page_desc(skb_frag_t *frag,
 #if (KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE)
 #define HAVE_IMPORT_NS_STRING
 #endif /* 6.13.0 */
+
+#ifndef IONIC_HAVE_TIMER_DELETE
+#define timer_delete_sync del_timer_sync
+#endif
 
 #endif /* _KCOMPAT_H_ */

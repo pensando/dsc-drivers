@@ -8,6 +8,7 @@
 #ifndef IONIC_KCOMPAT_H
 #define IONIC_KCOMPAT_H
 
+#ifdef IONIC_NOT_UPSTREAM
 #include "autocompat.h"
 #include <rdma/ib_verbs.h>
 
@@ -53,6 +54,10 @@
 #ifndef UTS_UBUNTU_RELEASE_ABI
 #define UBUNTU_VERSION_CODE 0
 #else
+#ifndef CONFIG_VERSION_SIGNATURE
+#undef UTS_UBUNTU_RELEASE_ABI
+#define UTS_UBUNTU_RELEASE_ABI 0
+#endif
 #if UTS_UBUNTU_RELEASE_ABI > 65535
 #error UTS_UBUNTU_RELEASE_ABI is too large...
 #endif /* UTS_UBUNTU_RELEASE_ABI > 65535 */
@@ -104,10 +109,6 @@
 
 #if IONIC_KCOMPAT_KERN_VERSION_PRIOR_TO(/* Linux */ 3,11, /* RHEL */ 7,6, /* UBUNTU */ 0)
 #define netdev_notifier_info_to_dev(ptr) (ptr)
-#endif
-
-#if defined(IONIC_HAVE_DEV_GET_VECTOR_AFFINITY) || defined(IONIC_HAVE_DEVOP_GET_VECTOR_AFFINITY)
-#define IONIC_HAVE_GET_VECTOR_AFFINITY
 #endif
 
 #if IONIC_KCOMPAT_KERN_VERSION_PRIOR_TO(/* Linux */ 4,16, /* RHEL */ 7,7, /* UBUNTU */ 0)
@@ -193,8 +194,18 @@ static inline void xa_erase(struct xarray *xa, unsigned long idx)
 	xa_unlock(xa);
 }
 #endif /* IONIC_HAVE_XARRAY */
-#ifndef IONIC_HAVE_STATIC_ASSERT
 
+#ifndef IONIC_HAVE_RDMA_GET_UDP_SPORT
+static inline u16 rdma_get_udp_sport(u32 fl, u32 lqpn, u32 rqpn)
+{
+	if (!fl)
+		fl = rdma_calc_flow_label(lqpn, rqpn);
+
+	return rdma_flow_label_to_udp_sport(fl);
+}
+#endif
+
+#ifndef IONIC_HAVE_STATIC_ASSERT
 #define __static_assert(expr, msg, ...) _Static_assert(expr, msg)
 #define static_assert(expr, ...) __static_assert(expr, ##__VA_ARGS__, #expr)
 #endif
@@ -216,15 +227,6 @@ static inline void xa_erase(struct xarray *xa, unsigned long idx)
 #define IB_DEVICE_NODE_DESC_MAX sizeof(((struct ib_device *)0)->node_desc)
 #endif
 
-#if defined(IONIC_HAVE_DEV_CREATE_AH_UDATA) || defined(IONIC_HAVE_DEVOP_CREATE_AH_UDATA) \
-		|| defined(IONIC_HAVE_CREATE_AH_FLAGS) || defined(IONIC_HAVE_CREATE_AH_INIT_ATTR)
-#define IONIC_HAVE_CREATE_AH_UDATA
-#endif
-
-#if defined(IONIC_HAVE_DEV_GET_DEV_FW_STR) || defined(IONIC_HAVE_DEVOP_GET_DEV_FW_STR)
-#define IONIC_HAVE_GET_DEV_FW_STR
-#endif
-
 #if IONIC_KCOMPAT_VERSION_PRIOR_TO(/* Linux */ 4,11, /* RHEL */ 7,5, /* OFA */ 4_11)
 #define HAVE_REQUIRED_DMA_DEVICE
 #endif
@@ -234,24 +236,34 @@ static inline void xa_erase(struct xarray *xa, unsigned long idx)
 #else /* 4.14.0 and later */
 #endif
 
-#if defined(IONIC_HAVE_DEV_GET_DEV_FW_STR_LEN) || defined(IONIC_HAVE_DEVOP_GET_DEV_FW_STR_LEN)
-#define IONIC_HAVE_GET_DEV_FW_STR_LEN
-#endif
-
 #if defined(IONIC_HAVE_DEV_IB_GID_DEV_PORT_ID) || defined(IONIC_HAVE_DEVOP_IB_GID_DEV_PORT_ID)
 #define IONIC_HAVE_IB_GID_DEV_PORT_INDEX
 #endif
 
-#if defined(IONIC_HAVE_RDMA_DRIVER_ID) || defined(IONIC_HAVE_RDMA_DEV_OPS_EXT)
-#define RDMA_DRIVER_IONIC 242
+#if IONIC_KCOMPAT_VERSION_PRIOR_TO(/* Linux */ 5,0, /* RHEL */ 99,99, /* OFA */ 5_0)
+#define RDMA_CREATE_AH_SLEEPABLE 0
+#endif
+#endif /* IONIC_NOT_UPSTREAM*/
+
+#if defined(IONIC_HAVE_DEV_GET_VECTOR_AFFINITY) || defined(IONIC_HAVE_DEVOP_GET_VECTOR_AFFINITY)
+#define IONIC_HAVE_GET_VECTOR_AFFINITY
+#endif
+
+#if defined(IONIC_HAVE_DEV_GET_DEV_FW_STR) || defined(IONIC_HAVE_DEVOP_GET_DEV_FW_STR)
+#define IONIC_HAVE_GET_DEV_FW_STR
+#endif
+
+#if defined(IONIC_HAVE_DEV_GET_DEV_FW_STR_LEN) || defined(IONIC_HAVE_DEVOP_GET_DEV_FW_STR_LEN)
+#define IONIC_HAVE_GET_DEV_FW_STR_LEN
+#endif
+
+#if defined(IONIC_HAVE_DEV_CREATE_AH_UDATA) || defined(IONIC_HAVE_DEVOP_CREATE_AH_UDATA) || \
+	defined(IONIC_HAVE_CREATE_AH_FLAGS) || defined(IONIC_HAVE_CREATE_AH_INIT_ATTR)
+#define IONIC_HAVE_CREATE_AH_UDATA
 #endif
 
 #if defined(IONIC_HAVE_DEV_CONST_IB_WR) || defined(IONIC_HAVE_DEVOP_CONST_IB_WR)
 #define IONIC_HAVE_CONST_IB_WR
-#endif
-
-#if IONIC_KCOMPAT_VERSION_PRIOR_TO(/* Linux */ 5,0, /* RHEL */ 99,99, /* OFA */ 5_0)
-#define RDMA_CREATE_AH_SLEEPABLE 0
 #endif
 
 #ifndef IONIC_HAVE_UNSIGNED_BITMAP_WEIGHT
@@ -588,6 +600,7 @@ enum ib_port_phys_state {
 #define IONIC_HAVE_RDMA_DEVICE_GROUP
 #endif
 
+#ifdef IONIC_NOT_UPSTREAM
 #ifdef BROKEN_IBDEV_PRINT
 #define IONIC_HAVE_IBDEV_PRINT
 #undef ibdev_dbg
@@ -608,4 +621,5 @@ enum ib_port_phys_state {
 	dev_warn_ratelimited(&(ibdev)->dev, ##__VA_ARGS__)
 
 #endif /* IONIC_HAVE_IBDEV_PRINT_RATELIMITED */
+#endif /* IONIC_NOT_UPSTREAM */
 #endif /* IONIC_KCOMPAT_H */

@@ -22,6 +22,8 @@
 #define IONIC_CMB_ENABLE	1
 #define IONIC_CMB_REQUIRE	2
 #define IONIC_CMB_EXPDB		4
+#define IONIC_CMB_WC		8
+#define IONIC_CMB_UC		16
 
 struct ionic_ctx_req {
 	__u32 rsvd[2];

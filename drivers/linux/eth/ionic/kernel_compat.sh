@@ -27,6 +27,7 @@ IONIC_HAVE_NET_DIM_SAMPLE_PTR			symtype		net_dim				include/linux/dim.h	void(str
 IONIC_HAVE_DEVLINK_EXT_ACK_PARAM		memtype		struct_devlink_param		set		include/net/devlink.h	int (*)(struct devlink *, u32, struct devlink_param_gset_ctx *, struct netlink_ext_ack *)
 IONIC_HAVE_ETHTOOL_COALESCE_CQE			memtype		struct_ethtool_ops		get_coalesce	include/linux/ethtool.h int (*)(struct net_device *, struct ethtool_coalesce *, struct kernel_ethtool_coalesce *, struct netlink_ext_ack *)
 IONIC_HAVE_ETHTOOL_SET_RINGPARAM_EXTACK		memtype		struct_ethtool_ops		set_ringparam	include/linux/ethtool.h int (*)(struct net_device *, struct ethtool_ringparam *, struct kernel_ethtool_ringparam *, struct netlink_ext_ack *)
+IONIC_HAVE_TIMER_DELETE                         symbol          timer_delete                    include/linux/timer.h
 " | egrep -v -e '^#' -e '^$' | sed 's/[ \t][ \t]*/:/g'
 }
 

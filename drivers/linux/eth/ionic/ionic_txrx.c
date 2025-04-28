@@ -849,6 +849,7 @@ static void ionic_rx_clean(struct ionic_queue *q,
 #ifdef IONIC_DEBUG_STATS
 		stats->csum_none++;
 #endif
+		skb->ip_summed = CHECKSUM_NONE;
 	}
 
 	if (unlikely((comp->csum_flags & IONIC_RXQ_COMP_CSUM_F_TCP_BAD) ||

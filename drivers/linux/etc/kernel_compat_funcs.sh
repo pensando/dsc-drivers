@@ -1,3 +1,4 @@
+#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 #
 # Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
@@ -420,14 +421,14 @@ obj-m := test.o
 EOF
     if [ -n "${LINUXINCLUDE:-}" ]; then
         make -rR CROSS_COMPILE=$CROSS_COMPILE -C $KPATH ARCH=$ARCH \
-        LINUXINCLUDE="$LINUXINCLUDE" M=$dir O=$KOUT ${CC:+CC="$CC"} >$dir/log 2>&1
+        LINUXINCLUDE="$LINUXINCLUDE" M=$dir O=$KOUT ${CC:+CC="$CC"} ${LD:+LD="$LD"} >$dir/log 2>&1
     else
         make -rR CROSS_COMPILE=$CROSS_COMPILE -C $KPATH ARCH=$ARCH \
-        M=$dir O=$KOUT ${CC:+CC="$CC"} >$dir/log 2>&1
+        M=$dir O=$KOUT ${CC:+CC="$CC"} ${LD:+LD="$LD"} >$dir/log 2>&1
     fi
     rc=$?
 
-    if [ $verbose = true ]; then
+    if [ $verbose = true ] || [ $rc != 0 ]; then
         echo >&2 "tried to compile:"
         sed >&2 's/^/    /' $dir/test.c
         echo >&2 "compiler output:"

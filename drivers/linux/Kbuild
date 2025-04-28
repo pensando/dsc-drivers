@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+
+subdir-ccflags-y := -I$(src)/eth/ionic
+
+obj-$(CONFIG_IONIC) := eth/ionic/
+obj-$(CONFIG_IONIC_MNIC) += eth/ionic/
+ifneq ($(wildcard $(src)/mdev),)
+obj-$(CONFIG_MNET_UIO_PDRV_GENIRQ) += mnet_uio_pdrv_genirq/
+obj-$(CONFIG_MDEV) += mdev/
+endif
+ifneq ($(wildcard $(src)/rdma),)
+obj-$(CONFIG_INFINIBAND_IONIC) += rdma/drv/ionic/
+endif

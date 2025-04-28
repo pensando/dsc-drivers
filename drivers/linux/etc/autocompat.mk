@@ -1,12 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
 # Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
-#
-# Note: you MUST set TOPDIR before including this file.
-
-ifdef KERNELRELEASE
-# kbuild part of makefile
-#
 
 # filechk
 FILECHK_TIMESTAMP := $(shell date +"%N")
@@ -35,10 +29,10 @@ $(obj)/.kpath: FORCE
 		$(if $(MMAKE_IN_KBUILD),,rm -f $(obj)/*.symvers;)	\
 	fi
 
-KSRC := $(or $(KBUILD_SRC), $(CURDIR))
+_KSRC := $(or $(KBUILD_SRC),$(KSRC),$(CURDIR))
 ODIR := $(CURDIR)
-ifeq ($(KSRC), $(KBUILD_EXTMOD))
-	KSRC := $(srctree)
+ifeq ($(_KSRC), $(KBUILD_EXTMOD))
+	_KSRC := $(srctree)
 endif
 ifeq ($(ODIR), $(KBUILD_EXTMOD))
 	ODIR := $(srctree)
@@ -46,16 +40,14 @@ endif
 
 ifeq ($(wildcard $(OFA_KSRC)),)
 define filechk_autocompat.h
-	$(src)/kernel_compat.sh -k $(KSRC) -o "$(ODIR)" -a $(ARCH) $(if $(filter 1,$(V)),-v,-q)
+	$(src)/kernel_compat.sh -k $(_KSRC) -o "$(ODIR)" -a $(ARCH) $(if $(filter 1,$(V)),-v,-q)
 endef
 else
 define filechk_autocompat.h
-	$(src)/kernel_compat.sh -k $(KSRC) -o "$(ODIR)" -a $(ARCH) -i '$(LINUXINCLUDE)' -f $(OFA_KSRC) $(if $(filter 1,$(V)),-v,-q)
+	$(src)/kernel_compat.sh -k $(_KSRC) -o "$(ODIR)" -a $(ARCH) -i '$(LINUXINCLUDE)' -f $(OFA_KSRC) $(if $(filter 1,$(V)),-v,-q)
 endef
 endif
 
-$(src)/autocompat.h: $(obj)/.kpath $(src)/kernel_compat.sh $(TOPDIR)/etc/kernel_compat_funcs.sh
+$(src)/autocompat.h: $(obj)/.kpath $(src)/kernel_compat.sh $(srcroot)/etc/kernel_compat_funcs.sh
 	+$(call filecheck,autocompat.h)
 	@touch $@
-
-endif

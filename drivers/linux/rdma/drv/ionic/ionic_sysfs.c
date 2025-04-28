@@ -26,11 +26,7 @@ int ionic_max_pd = 1024;
 bool ionic_stats_enable;
 bool ionic_lats_enable;
 static bool ionic_nosupport;
-int ionic_spec = IONIC_SPEC_HIGH;
-
-// TODO: delete these -- short term override for feature negotiation
-bool ionic_sqcmb_expdb;
-bool ionic_rqcmb_expdb;
+int ionic_spec = IONIC_SPEC_LOW;
 
 #ifdef IONIC_HAVE_CONFIGFS
 #define IRCFG_ACCESS(_var, _type, _fmt, _func)				\
@@ -74,10 +70,6 @@ IRCFG_INT(max_pd);
 IRCFG_BOOL(stats_enable);
 IRCFG_BOOL(lats_enable);
 IRCFG_BOOL(nosupport);
-
-// TODO: delete these -- short term override for feature negotiation
-IRCFG_BOOL(sqcmb_expdb);
-IRCFG_BOOL(rqcmb_expdb);
 
 /* Special handling for spec */
 static ssize_t ionic_rdma_spec_show(struct config_item *item, char *pg)
@@ -145,10 +137,6 @@ CONFIGFS_ATTR(ionic_rdma_, nosupport);
 CONFIGFS_ATTR(ionic_rdma_, spec);
 CONFIGFS_ATTR_RO(ionic_rdma_, description);
 
-// TODO: delete these -- short term override for feature negotiation
-CONFIGFS_ATTR(ionic_rdma_, sqcmb_expdb);
-CONFIGFS_ATTR(ionic_rdma_, rqcmb_expdb);
-
 static struct configfs_attribute *ionic_rdma_attrs[] = {
 	&ionic_rdma_attr_dbg_enable,
 	&ionic_rdma_attr_sqcmb_order,
@@ -166,9 +154,6 @@ static struct configfs_attribute *ionic_rdma_attrs[] = {
 	&ionic_rdma_attr_nosupport,
 	&ionic_rdma_attr_spec,
 	&ionic_rdma_attr_description,
-	// TODO: delete these -- short term override for feature negotiation
-	&ionic_rdma_attr_sqcmb_expdb,
-	&ionic_rdma_attr_rqcmb_expdb,
 	NULL,
 };
 
@@ -232,12 +217,6 @@ MODULE_PARM_DESC(lats_enable,
 
 module_param_named(nosupport, ionic_nosupport, bool, 0644);
 MODULE_PARM_DESC(nosupport, "Enable unsupported config values.");
-
-// TODO: delete these -- short term override for feature negotiation
-module_param_named(sqcmb_expdb, ionic_sqcmb_expdb);
-MODULE_PARM_DESC(sqcmb_expdb, "Override sqcmb feature negotiation");
-module_param_named(rqcmb_expdb, ionic_rqcmb_expdb);
-MODULE_PARM_DESC(rqcmb_expdb, "Override rqcmb feature negotiation");
 
 /* Special handling for spec */
 static int ionic_set_spec(const char *val, const struct kernel_param *kp)
@@ -336,13 +315,6 @@ static void ionic_q_dump(struct seq_file *s, struct ionic_queue *q)
 	seq_hex_dump(s, "", DUMP_PREFIX_OFFSET, 16, 1, q->ptr, q->size, true);
 }
 
-static void ionic_tbl_res_show(struct seq_file *s, const char *w,
-			       struct ionic_tbl_res *res)
-{
-	seq_printf(s, "%stbl_order:\t%u\n", w, res->tbl_order);
-	seq_printf(s, "%stbl_pos:\t%#x\n", w, res->tbl_pos);
-}
-
 static void ionic_tbl_buf_show(struct seq_file *s, const char *w,
 			       struct ionic_tbl_buf *buf)
 {
@@ -373,6 +345,7 @@ static int ionic_dev_info_show(struct seq_file *s, void *v)
 	seq_printf(s, "dbid:\t%u\n", dev->dbid);
 
 	seq_printf(s, "rdma_version:\t%u\n", dev->rdma_version);
+	seq_printf(s, "rdma_minor_version:\t%u\n", (dev->ident->rdma.minor_version));
 	seq_printf(s, "qp_opcodes:\t%u\n", dev->qp_opcodes);
 	seq_printf(s, "admin_opcodes:\t%u\n", dev->admin_opcodes);
 	seq_printf(s, "reset_cnt:\t%u\n", dev->reset_cnt);
@@ -440,16 +413,8 @@ static int ionic_dev_info_show(struct seq_file *s, void *v)
 					      dev->udma_qgrp_shift,
 					      dev->half_qpid_udma_shift));
 
-	seq_printf(s, "inuse_restbl:\t%u\n",
-		   bitmap_weight(dev->inuse_restbl.inuse,
-				 dev->inuse_restbl.inuse_size));
-	seq_printf(s, "size_restbl:\t%u\n",
-		   dev->inuse_restbl.inuse_size);
-	seq_printf(s, "order_restbl:\t%u\n", dev->inuse_restbl.order_max);
-
-	for (i = 0; i <= dev->inuse_restbl.order_max; ++i)
-		seq_printf(s, "next_restbl[%d]:\t%u\n", i,
-			   dev->inuse_restbl.order_next[i]);
+	seq_printf(s, "page_size_supported:\t0x%llX\n", dev->page_size_supported);
+	seq_printf(s, "stats_type:\t0x%0X\n", cpu_to_le16(dev->ident->rdma.stats_type));
 
 	return 0;
 }
@@ -683,7 +648,6 @@ static int ionic_mr_info_show(struct seq_file *s, void *v)
 
 	seq_printf(s, "mrid:\t%u\n", mr->mrid);
 
-	ionic_tbl_res_show(s, "", &mr->res);
 	ionic_tbl_buf_show(s, "", &mr->buf);
 
 	if (mr->umem)
@@ -788,8 +752,6 @@ static int ionic_cq_info_show(struct seq_file *s, void *v)
 
 	seq_printf(s, "cqid:\t%u\n", cq->cqid);
 	seq_printf(s, "eqid:\t%u\n", cq->eqid);
-
-	ionic_tbl_res_show(s, "", &cq->res);
 
 	if (cq->q.ptr) {
 		ionic_q_show(s, "", &cq->q);
@@ -1080,7 +1042,7 @@ static ssize_t ionic_aq_ctrl_write(struct file *fp, const char __user *ubuf,
 			continue;
 		}
 
-		num = match_whole_prefix(buf + pos, "tbl");
+		num = match_whole_prefix(buf + pos, "op");
 		if (num) {
 			pos += num;
 
@@ -1091,12 +1053,12 @@ static ssize_t ionic_aq_ctrl_write(struct file *fp, const char __user *ubuf,
 			}
 
 			pos += num;
+			wr->wr.wqe.op = val;
 
-			wr->wr.wqe.type_state = val;
 			continue;
 		}
 
-		num = match_whole_prefix(buf + pos, "idx");
+		num = match_whole_prefix(buf + pos, "len");
 		if (rc == 1) {
 			pos += num;
 
@@ -1107,8 +1069,8 @@ static ssize_t ionic_aq_ctrl_write(struct file *fp, const char __user *ubuf,
 			}
 
 			pos += num;
+			wr->wr.wqe.len = cpu_to_le32(val);
 
-			wr->wr.wqe.id_ver = cpu_to_le32(val);
 			continue;
 		}
 
@@ -1167,8 +1129,8 @@ void ionic_dbg_add_aq(struct ionic_ibdev *dev, struct ionic_aq *aq)
 		goto err_dma;
 
 	wr->wr.wqe.op = IONIC_V1_ADMIN_DEBUG;
-	wr->wr.wqe.stats.dma_addr = cpu_to_le64(wr->dma);
-	wr->wr.wqe.stats.length = cpu_to_le32(PAGE_SIZE);
+	wr->wr.wqe.cmd.stats.dma_addr = cpu_to_le64(wr->dma);
+	wr->wr.wqe.cmd.stats.length = cpu_to_le32(PAGE_SIZE);
 
 	init_completion(&wr->wr.work);
 
@@ -1237,8 +1199,6 @@ static int ionic_qp_info_show(struct seq_file *s, void *v)
 		if (qp->sq_umem)
 			ionic_umem_show(s, "sq.", qp->sq_umem);
 
-		ionic_tbl_res_show(s, "sq.", &qp->sq_res);
-
 		seq_printf(s, "sq_is_cmb:\t%d\n", !!(qp->sq_cmb & IONIC_CMB_ENABLE));
 		if (qp->sq_cmb & IONIC_CMB_ENABLE) {
 			seq_printf(s, "sq_is_expdb:\t%d\n",
@@ -1278,8 +1238,6 @@ static int ionic_qp_info_show(struct seq_file *s, void *v)
 
 		if (qp->rq_umem)
 			ionic_umem_show(s, "rq.", qp->rq_umem);
-
-		ionic_tbl_res_show(s, "rq.", &qp->rq_res);
 
 		seq_printf(s, "rq_is_cmb:\t%d\n", !!(qp->rq_cmb & IONIC_CMB_ENABLE));
 		if (qp->rq_cmb & IONIC_CMB_ENABLE) {

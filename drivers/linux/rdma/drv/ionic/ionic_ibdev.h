@@ -6,7 +6,9 @@
 #ifndef IONIC_IBDEV_H
 #define IONIC_IBDEV_H
 
+#ifdef IONIC_NOT_UPSTREAM
 #include "ionic_kcompat.h"
+#endif
 
 #include <linux/device.h>
 #include <linux/netdevice.h>
@@ -48,7 +50,6 @@
 #define IONIC_PKEY_TBL_LEN	1
 
 #define IONIC_PAGE_SIZE_SUPPORTED	0x40201000 /* 4kb, 2Mb, 1Gb */
-#define IONIC_SPEC_RD_RCV	4
 #define IONIC_SPEC_LOW		8
 #define IONIC_SPEC_HIGH		16
 
@@ -61,10 +62,15 @@
 
 #define IONIC_ROCE_UDP_SPORT	28272
 
-#define IONIC_CMB_SUPPORTED	(IONIC_CMB_ENABLE | IONIC_CMB_REQUIRE | IONIC_CMB_EXPDB)
+#define IONIC_CMB_SUPPORTED	(IONIC_CMB_ENABLE | IONIC_CMB_REQUIRE | IONIC_CMB_EXPDB | \
+				 IONIC_CMB_WC | IONIC_CMB_UC)
 
 /* resource is not reserved on the device, indicated in tbl_order */
 #define IONIC_RES_INVALID	-1
+
+#if defined(IONIC_HAVE_RDMA_DRIVER_ID) || defined(IONIC_HAVE_RDMA_DEV_OPS_EXT)
+#define RDMA_DRIVER_IONIC 21
+#endif
 
 struct dcqcn_root;
 struct ionic_aq;
@@ -133,6 +139,7 @@ struct ionic_ibdev {
 	u8			expdb_mask;
 	u8			udma_count;
 	u8			udma_qgrp_shift;
+	u64			page_size_supported;
 
 	/* These tables are used in the fast path.
 	 * They are protected by rw locks.
@@ -152,7 +159,6 @@ struct ionic_ibdev {
 	struct mutex		inuse_lock; /* for id reservation */
 	spinlock_t		inuse_splock; /* for ahid reservation */
 
-	struct ionic_buddy_bits	inuse_restbl;
 	struct ionic_resid_bits	inuse_pdid;
 	struct ionic_resid_bits	inuse_ahid;
 	struct ionic_resid_bits	inuse_mrid;
@@ -237,6 +243,11 @@ struct ionic_admin_wr {
 	int			status;
 };
 
+struct ionic_admin_wr_q {
+	struct ionic_admin_wr	*wr;
+	int	wqe_strides;
+};
+
 struct ionic_aq {
 	struct ionic_ibdev	*dev;
 	struct ionic_vcq	*vcq;
@@ -251,7 +262,7 @@ struct ionic_aq {
 
 	spinlock_t		lock; /* for posting */
 	struct ionic_queue	q;
-	struct ionic_admin_wr	**q_wr;
+	struct ionic_admin_wr_q	*q_wr;
 	struct list_head	wr_prod;
 	struct list_head	wr_post;
 
@@ -268,11 +279,6 @@ struct ionic_ctx {
 	unsigned long long	mmap_off;
 	struct list_head	mmap_list;
 	struct ionic_mmap_info	mmap_dbell;
-};
-
-struct ionic_tbl_res {
-	int			tbl_order;
-	int			tbl_pos;
 };
 
 struct ionic_tbl_buf {
@@ -316,7 +322,6 @@ struct ionic_cq {
 
 	/* infrequently accessed, keep at end */
 	struct ib_umem		*umem;
-	struct ionic_tbl_res	res;
 
 	struct dentry		*debug;
 };
@@ -418,7 +423,6 @@ struct ionic_qp {
 	struct ionic_mmap_info	sq_cmb_mmap;
 
 	struct ib_umem		*sq_umem;
-	struct ionic_tbl_res	sq_res;
 
 	int			rq_cmb_order;
 	u32			rq_cmb_pgid;
@@ -426,10 +430,6 @@ struct ionic_qp {
 	struct ionic_mmap_info	rq_cmb_mmap;
 
 	struct ib_umem		*rq_umem;
-	struct ionic_tbl_res	rq_res;
-
-	struct ionic_tbl_res	rsq_res;
-	struct ionic_tbl_res	rrq_res;
 
 	int			dcqcn_profile;
 
@@ -455,7 +455,6 @@ struct ionic_mr {
 	int			flags;
 
 	struct ib_umem		*umem;
-	struct ionic_tbl_res	res;
 	struct ionic_tbl_buf	buf;
 	bool			created;
 
@@ -581,8 +580,6 @@ void ionic_kill_ibdev(struct ionic_ibdev *dev, bool fatal_path);
 
 /* ionic_controlpath.c */
 void ionic_controlpath_setops(struct ionic_ibdev *dev);
-int ionic_get_res(struct ionic_ibdev *dev, struct ionic_tbl_res *res);
-bool ionic_put_res(struct ionic_ibdev *dev, struct ionic_tbl_res *res);
 int ionic_create_cq_common(struct ionic_vcq *vcq,
 			   struct ionic_tbl_buf *buf,
 			   const struct ib_cq_init_attr *attr,
@@ -607,7 +604,7 @@ __le64 ionic_pgtbl_dma(struct ionic_tbl_buf *buf, u64 va);
 __be64 ionic_pgtbl_off(struct ionic_tbl_buf *buf, u64 va);
 int ionic_pgtbl_page(struct ionic_tbl_buf *buf, u64 dma);
 int ionic_pgtbl_umem(struct ionic_tbl_buf *buf, struct ib_umem *umem);
-int ionic_pgtbl_init(struct ionic_ibdev *dev, struct ionic_tbl_res *res,
+int ionic_pgtbl_init(struct ionic_ibdev *dev,
 		     struct ionic_tbl_buf *buf, struct ib_umem *umem,
 		     dma_addr_t dma, int limit, u64 page_size);
 void ionic_pgtbl_unbuf(struct ionic_ibdev *dev, struct ionic_tbl_buf *buf);
@@ -637,9 +634,5 @@ extern u16 ionic_eq_isr_budget;
 extern u16 ionic_eq_work_budget;
 extern int ionic_max_pd;
 extern int ionic_spec;
-
-// TODO: delete these -- short term override for feature negotiation
-extern bool ionic_sqcmb_expdb;
-extern bool ionic_rqcmb_expdb;
 
 #endif /* IONIC_IBDEV_H */

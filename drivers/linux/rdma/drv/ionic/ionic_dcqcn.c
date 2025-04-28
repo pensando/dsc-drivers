@@ -91,20 +91,20 @@ static const struct dcqcn_vals dcqcn_defaults[] = {
 		.v[NP_ICNP_802P_PRIO]			= 6,
 		.v[NP_CNP_DSCP]				= 48,
 		.v[RP_TOKEN_BUCKET_SIZE]		= 4000000,
-		.v[RP_INITIAL_ALPHA_VALUE]		= 1023,
-		.v[RP_DCE_TCP_G]			= 1019,
-		.v[RP_DCE_TCP_RTT]			= 55,
-		.v[RP_RATE_REDUCE_MONITOR_PERIOD]	= 4,
+		.v[RP_INITIAL_ALPHA_VALUE]		= 64,
+		.v[RP_DCE_TCP_G]			= 50,
+		.v[RP_DCE_TCP_RTT]			= 100,
+		.v[RP_RATE_REDUCE_MONITOR_PERIOD]	= 100,
 		.v[RP_MIN_RATE]				= 1,
 		.v[RP_GD]				= 11,
 		.v[RP_MIN_DEC_FAC]			= 50,
 		.v[RP_CLAMP_TGT_RATE_ATI]		= 1,
-		.v[RP_THRESHOLD]			= 5,
-		.v[RP_TIME_RESET]			= 5,
+		.v[RP_THRESHOLD]			= 1,
+		.v[RP_TIME_RESET]			= 10,
 		.v[RP_QP_RATE]				= 100000,
-		.v[RP_BYTE_RESET]			= 131068,
-		.v[RP_AI_RATE]				= 5,
-		.v[RP_HAI_RATE]				= 50,
+		.v[RP_BYTE_RESET]			= 431068,
+		.v[RP_AI_RATE]				= 200,
+		.v[RP_HAI_RATE]				= 200,
 	},
 };
 
@@ -124,67 +124,70 @@ static void dcqcn_set_profile(struct dcqcn_profile *prof)
 		.work = COMPLETION_INITIALIZER_ONSTACK(wr.work),
 		.wqe = {
 			.op = IONIC_V1_ADMIN_MODIFY_DCQCN,
-			.id_ver = cpu_to_le32(prof_i + 1),
+			.len = cpu_to_le16(IONIC_ADMIN_MODIFY_DCQCN_IN_V1_LEN),
+			.cmd.mod_dcqcn = {
+				.id_ver = cpu_to_le32(prof_i + 1),
+			}
 		}
 	};
 	int rc;
 
-	wr.wqe.mod_dcqcn.np_incp_802p_prio =
+	wr.wqe.cmd.mod_dcqcn.np_incp_802p_prio =
 		prof->vals.v[NP_ICNP_802P_PRIO];
 
-	wr.wqe.mod_dcqcn.np_cnp_dscp =
+	wr.wqe.cmd.mod_dcqcn.np_cnp_dscp =
 		prof->vals.v[NP_CNP_DSCP];
 
-	wr.wqe.mod_dcqcn.rp_token_bucket_size =
+	wr.wqe.cmd.mod_dcqcn.rp_token_bucket_size =
 		cpu_to_be64(prof->vals.v[RP_TOKEN_BUCKET_SIZE]);
 
-	wr.wqe.mod_dcqcn.rp_initial_alpha_value =
+	wr.wqe.cmd.mod_dcqcn.rp_initial_alpha_value =
 		cpu_to_be16(prof->vals.v[RP_INITIAL_ALPHA_VALUE]);
 
-	wr.wqe.mod_dcqcn.rp_dce_tcp_g =
+	wr.wqe.cmd.mod_dcqcn.rp_dce_tcp_g =
 		cpu_to_be16(prof->vals.v[RP_DCE_TCP_G]);
 
-	wr.wqe.mod_dcqcn.rp_dce_tcp_rtt =
+	wr.wqe.cmd.mod_dcqcn.rp_dce_tcp_rtt =
 		cpu_to_be32(prof->vals.v[RP_DCE_TCP_RTT]);
 
-	wr.wqe.mod_dcqcn.rp_rate_reduce_monitor_period =
+	wr.wqe.cmd.mod_dcqcn.rp_rate_reduce_monitor_period =
 		cpu_to_be32(prof->vals.v[RP_RATE_REDUCE_MONITOR_PERIOD]);
 
-	wr.wqe.mod_dcqcn.rp_rate_to_set_on_first_cnp =
+	wr.wqe.cmd.mod_dcqcn.rp_rate_to_set_on_first_cnp =
 		cpu_to_be32(prof->vals.v[RP_RATE_TO_SET_ON_FIRST_CNP]);
 
-	wr.wqe.mod_dcqcn.rp_min_rate =
+	wr.wqe.cmd.mod_dcqcn.rp_min_rate =
 		cpu_to_be32(prof->vals.v[RP_MIN_RATE]);
 
-	wr.wqe.mod_dcqcn.rp_gd =
+	wr.wqe.cmd.mod_dcqcn.rp_gd =
 		prof->vals.v[RP_GD];
 
-	wr.wqe.mod_dcqcn.rp_min_dec_fac =
+	wr.wqe.cmd.mod_dcqcn.rp_min_dec_fac =
 		prof->vals.v[RP_MIN_DEC_FAC];
 
 	if (prof->vals.v[RP_CLAMP_TGT_RATE])
-		wr.wqe.mod_dcqcn.rp_clamp_flags |= IONIC_RPF_CLAMP_TGT_RATE;
+		wr.wqe.cmd.mod_dcqcn.rp_clamp_flags |= IONIC_RPF_CLAMP_TGT_RATE;
 
 	if (prof->vals.v[RP_CLAMP_TGT_RATE_ATI])
-		wr.wqe.mod_dcqcn.rp_clamp_flags |=
+		wr.wqe.cmd.mod_dcqcn.rp_clamp_flags |=
 			IONIC_RPF_CLAMP_TGT_RATE_ATI;
 
-	wr.wqe.mod_dcqcn.rp_threshold =
+	wr.wqe.cmd.mod_dcqcn.rp_threshold =
 		prof->vals.v[RP_THRESHOLD];
 
-	wr.wqe.mod_dcqcn.rp_time_reset =
+	wr.wqe.cmd.mod_dcqcn.rp_time_reset =
 		cpu_to_be32(prof->vals.v[RP_TIME_RESET]);
 
-	wr.wqe.mod_dcqcn.rp_qp_rate =
+	wr.wqe.cmd.mod_dcqcn.rp_qp_rate =
 		cpu_to_be32(prof->vals.v[RP_QP_RATE]);
 
-	wr.wqe.mod_dcqcn.rp_byte_reset =
+	wr.wqe.cmd.mod_dcqcn.rp_byte_reset =
 		cpu_to_be32(prof->vals.v[RP_BYTE_RESET]);
 
-	wr.wqe.mod_dcqcn.rp_ai_rate =
+	wr.wqe.cmd.mod_dcqcn.rp_ai_rate =
 		cpu_to_be32(prof->vals.v[RP_AI_RATE]);
 
-	wr.wqe.mod_dcqcn.rp_hai_rate =
+	wr.wqe.cmd.mod_dcqcn.rp_hai_rate =
 		cpu_to_be32(prof->vals.v[RP_HAI_RATE]);
 
 	ionic_admin_post(dev, &wr);

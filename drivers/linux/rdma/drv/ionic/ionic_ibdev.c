@@ -23,9 +23,18 @@ MODULE_AUTHOR("Allen Hubbe <allen.hubbe@amd.com>");
 MODULE_DESCRIPTION("Pensando RoCE HCA driver");
 MODULE_LICENSE("Dual BSD/GPL");
 
-#define DRIVER_VERSION "0.8.0"
+#ifdef IONIC_NOT_UPSTREAM
+/* module version not to be upstreamed */
+#ifndef IONIC_DRV_VERSION
+#define IONIC_DRV_VERSION	drv_ver
+#endif
+MODULE_VERSION(IONIC_DRV_VERSION);
+#endif
+
 #define DRIVER_DESCRIPTION "Pensando RoCE HCA driver"
 #define DEVICE_DESCRIPTION "Pensando RoCE HCA"
+
+#define IONIC_VERSION(a, b) (((a) << 16) + ((b) << 8))
 
 static const struct auxiliary_device_id ionic_aux_id_table[] = {
 	{ .name = IONIC_AUX_DEVNAME, },
@@ -71,9 +80,8 @@ static int ionic_query_device(struct ib_device *ibdev,
 
 	addrconf_ifid_eui48((u8 *)&attr->sys_image_guid, dev->ndev);
 	attr->max_mr_size =
-		((u64)dev->inuse_restbl.inuse_size * PAGE_SIZE / 2) <<
-		(dev->cl_stride - dev->pte_stride);
-	attr->page_size_cap = IONIC_PAGE_SIZE_SUPPORTED;
+		le32_to_cpu(dev->ident->rdma.npts_per_lif) * PAGE_SIZE / 2;
+	attr->page_size_cap = dev->page_size_supported;
 	if (dev_is_pci(dev->hwdev)) {
 		attr->vendor_id = to_pci_dev(dev->hwdev)->vendor;
 		attr->vendor_part_id = to_pci_dev(dev->hwdev)->device;
@@ -98,19 +106,18 @@ static int ionic_query_device(struct ib_device *ibdev,
 		min(ionic_v1_send_wqe_max_sge(dev->max_stride, 0, false),
 		    ionic_spec);
 	attr->max_recv_sge =
-		min3(ionic_v1_recv_wqe_max_sge(dev->max_stride, 0, false),
-		     ionic_spec,
-		     IONIC_SPEC_RD_RCV);
-	attr->max_sge_rd = min(attr->max_send_sge, IONIC_SPEC_RD_RCV);
+		min(ionic_v1_recv_wqe_max_sge(dev->max_stride, 0, false),
+		    ionic_spec);
+	attr->max_sge_rd = attr->max_send_sge;
 #else
 	attr->max_sge =
 		min3(ionic_v1_send_wqe_max_sge(dev->max_stride, 0, false),
 		     ionic_v1_recv_wqe_max_sge(dev->max_stride, 0, false),
 		     ionic_spec);
-	attr->max_sge_rd = min(attr->max_sge, IONIC_SPEC_RD_RCV);
+	attr->max_sge_rd = attr->max_sge;
 #endif
 	attr->max_cq = dev->inuse_cqid.inuse_size / dev->udma_count;
-	attr->max_cqe = IONIC_MAX_CQ_DEPTH;
+	attr->max_cqe = IONIC_MAX_CQ_DEPTH - IONIC_CQ_GRACE;
 	attr->max_mr = dev->inuse_mrid.inuse_size;
 	attr->max_pd = ionic_max_pd;
 	attr->max_qp_rd_atom = IONIC_MAX_RD_ATOM;
@@ -125,8 +132,7 @@ static int ionic_query_device(struct ib_device *ibdev,
 	attr->max_mcast_qp_attach = 0;
 	attr->max_ah = dev->inuse_ahid.inuse_size;
 	attr->max_fast_reg_page_list_len =
-		(dev->inuse_restbl.inuse_size / 2) <<
-		(dev->cl_stride - dev->pte_stride);
+		le32_to_cpu(dev->ident->rdma.npts_per_lif) / 2;
 	attr->max_pkeys = IONIC_PKEY_TBL_LEN;
 
 	return 0;
@@ -377,7 +383,6 @@ static void ionic_destroy_ibdev(struct ionic_ibdev *dev)
 	ionic_resid_destroy(&dev->inuse_mrid);
 	ionic_resid_destroy(&dev->inuse_ahid);
 	ionic_resid_destroy(&dev->inuse_pdid);
-	ionic_buddy_destroy(&dev->inuse_restbl);
 	xa_destroy(&dev->qp_tbl);
 	xa_destroy(&dev->cq_tbl);
 
@@ -427,6 +432,9 @@ static const struct attribute_group ionic_rdma_attr_group = {
 };
 #endif
 
+static void ionic_disassociate_ucontext(struct ib_ucontext *ibcontext)
+{
+}
 static const struct ib_device_ops ionic_dev_ops = {
 #ifdef IONIC_HAVE_RDMA_DEV_OPS_EXT
 	.owner			= THIS_MODULE,
@@ -456,6 +464,7 @@ static const struct ib_device_ops ionic_dev_ops = {
 #ifdef IONIC_HAVE_DEVOPS_DEVICE_GROUP
 	.device_group		= &ionic_rdma_attr_group,
 #endif
+	.disassociate_ucontext	= ionic_disassociate_ucontext,
 };
 
 static struct ionic_ibdev *ionic_create_ibdev(void *handle,
@@ -476,6 +485,7 @@ static struct ionic_ibdev *ionic_create_ibdev(void *handle,
 
 	netdev_dbg(ndev, "rdma.version %d\n",
 		ident->rdma.version);
+	netdev_dbg(ndev, "rdma.minor_version %d\n", ident->rdma.minor_version);
 	netdev_dbg(ndev, "rdma.qp_opcodes %d\n",
 		ident->rdma.qp_opcodes);
 	netdev_dbg(ndev, "rdma.admin_opcodes %d\n",
@@ -558,6 +568,11 @@ static struct ionic_ibdev *ionic_create_ibdev(void *handle,
 	dev->qp_opcodes = ident->rdma.qp_opcodes;
 	dev->admin_opcodes = ident->rdma.admin_opcodes;
 
+	if (IONIC_VERSION(ident->rdma.version, ident->rdma.minor_version) >= IONIC_VERSION(2, 1))
+		dev->page_size_supported = cpu_to_le64(ident->rdma.page_size_cap);
+	else
+		dev->page_size_supported = IONIC_PAGE_SIZE_SUPPORTED;
+
 	/* base opcodes must be supported, extended opcodes are optional */
 	if (dev->rdma_version == 1 && dev->qp_opcodes <= IONIC_V1_OP_BIND_MW) {
 		netdev_dbg(ndev, "ionic_rdma: qp opcodes %d want min %d\n",
@@ -620,13 +635,12 @@ static struct ionic_ibdev *ionic_create_ibdev(void *handle,
 	if (dev->expdb_mask) {
 		struct ionic_qtype_info qti;
 
-		// TODO: call should return error code, output parameter
 		// TODO: use an rdma-specific qtype (nicmgr change)
-		qti = ionic_api_get_queue_identity(dev->handle, IONIC_QTYPE_TXQ);
-		dev->sq_expdb = !!(qti.features & IONIC_QIDENT_F_EXPDB);
+		if (!ionic_api_get_queue_identity(dev->handle, IONIC_QTYPE_TXQ, &qti))
+			dev->sq_expdb = !!(qti.features & IONIC_QIDENT_F_EXPDB);
 
-		qti = ionic_api_get_queue_identity(dev->handle, IONIC_QTYPE_RXQ);
-		dev->rq_expdb = !!(qti.features & IONIC_QIDENT_F_EXPDB);
+		if (!ionic_api_get_queue_identity(dev->handle, IONIC_QTYPE_RXQ, &qti))
+			dev->rq_expdb = !!(qti.features & IONIC_QIDENT_F_EXPDB);
 	}
 
 	dev->udma_qgrp_shift = ident->rdma.udma_shift;
@@ -657,12 +671,6 @@ static struct ionic_ibdev *ionic_create_ibdev(void *handle,
 
 	mutex_init(&dev->inuse_lock);
 	spin_lock_init(&dev->inuse_splock);
-
-	rc = ionic_buddy_init(&dev->inuse_restbl,
-			      le32_to_cpu(ident->rdma.npts_per_lif) >>
-			      (dev->cl_stride - dev->pte_stride));
-	if (rc)
-		goto err_restbl;
 
 	rc = ionic_resid_init(&dev->inuse_pdid, ionic_max_pd);
 	if (rc)
@@ -828,8 +836,6 @@ err_mrid:
 err_ahid:
 	ionic_resid_destroy(&dev->inuse_pdid);
 err_pdid:
-	ionic_buddy_destroy(&dev->inuse_restbl);
-err_restbl:
 	xa_destroy(&dev->qp_tbl);
 	xa_destroy(&dev->cq_tbl);
 	ib_dealloc_device(ibdev);
@@ -1000,7 +1006,6 @@ static_assert(sizeof(struct ionic_v1_atomic_bdy) == 48);
 static_assert(sizeof(struct ionic_v1_reg_mr_bdy) == 48);
 static_assert(sizeof(struct ionic_v1_bind_mw_bdy) == 48);
 static_assert(sizeof(struct ionic_v1_wqe) == 64);
-static_assert(sizeof(struct ionic_v1_admin_wqe) == 64);
 static_assert(sizeof(struct ionic_v1_eqe) == 4);
 
 static void __exit ionic_mod_exit(void)

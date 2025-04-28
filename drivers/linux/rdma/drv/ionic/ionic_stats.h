@@ -21,6 +21,15 @@ extern bool ionic_lats_enable;
 /* Valid opcodes are 0..255.  The histogram has 256 buckets. */
 #define IONIC_STATS_OPS	256
 
+/* Based on stats size, more than MAX_QPS_PER_COUNTER cannot fit into the socket
+ * buffer (4K) size sent by the ioroute2/rdma application. There may be a need to
+ * revisit max count if there are is increase in stats size.
+ * To support more QPs per counter, changes are needed in application and/or the
+ * kernel function res_get_common_dumpit to allow socket recvmsg to return with
+ * MSG_TRUNC flag in case of socket buffer overflow case.
+ */
+#define IONIC_MAX_QPS_PER_COUNTER 180
+
 struct ionic_counter_stats {
 	int queue_stats_count;
 	struct ionic_v1_stat *hdr;
@@ -36,6 +45,7 @@ struct ionic_counter_stats {
 struct ionic_counter {
 	void *vals;
 	struct list_head qp_list;
+	int num_qps;
 };
 
 /**

@@ -471,7 +471,7 @@ static void ionic_remove(struct pci_dev *pdev)
 	if (ionic->lif)
 		set_bit(IONIC_LIF_F_IN_SHUTDOWN, ionic->lif->state);
 
-	del_timer_sync(&ionic->watchdog_timer);
+	timer_delete_sync(&ionic->watchdog_timer);
 
 	if (ionic->lif) {
 		/* prevent adminq cmds if already known as down */
@@ -514,7 +514,7 @@ static void ionic_reset_prepare(struct pci_dev *pdev)
 	 * scheduled and render these del/cancel calls useless (i.e. don't mix
 	 * device triggered resets with userspace triggered resets).
 	 */
-	del_timer_sync(&ionic->watchdog_timer);
+	timer_delete_sync(&ionic->watchdog_timer);
 	cancel_work_sync(&lif->deferred.work);
 
 	ionic_auxbus_unregister(ionic->lif);

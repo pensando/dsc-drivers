@@ -98,11 +98,12 @@ static int ionic_hw_stats_cmd(struct ionic_ibdev *dev,
 		.work = COMPLETION_INITIALIZER_ONSTACK(wr.work),
 		.wqe = {
 			.op = op,
-			.id_ver = cpu_to_le32(qid),
-			.stats = {
+			.len = IONIC_ADMIN_STATS_HDRS_IN_V1_LEN,
+			.cmd.stats = {
 				.dma_addr = cpu_to_le64(dma),
 				.length = cpu_to_le32(len),
-			}
+				.id_ver = cpu_to_le32(qid),
+			},
 		}
 	};
 
@@ -299,7 +300,11 @@ static int ionic_counter_dealloc(struct rdma_counter *counter)
 	return 0;
 }
 
+#ifdef IONIC_HAVE_COUNTER_BIND_PORT
+static int ionic_counter_bind_qp(struct rdma_counter *counter, struct ib_qp *qp, u32 port)
+#else
 static int ionic_counter_bind_qp(struct rdma_counter *counter, struct ib_qp *qp)
+#endif
 {
 	struct ionic_ibdev *dev = to_ionic_ibdev(counter->device);
 	struct ionic_qp *ionic_qp = to_ionic_qp(qp);
@@ -310,17 +315,30 @@ static int ionic_counter_bind_qp(struct rdma_counter *counter, struct ib_qp *qp)
 	if (!ionic_counter)
 		return -EINVAL;
 
+	if (ionic_counter->num_qps >= IONIC_MAX_QPS_PER_COUNTER)
+		return -ENOMEM;
+
 	list_add_tail(&ionic_qp->qp_list_counter, &ionic_counter->qp_list);
 	qp->counter = counter;
+	ionic_counter->num_qps++;
 
 	return 0;
 }
 
+#ifdef IONIC_HAVE_COUNTER_BIND_PORT
+static int ionic_counter_unbind_qp(struct ib_qp *qp, u32 port)
+#else
 static int ionic_counter_unbind_qp(struct ib_qp *qp)
+#endif
 {
 	struct ionic_qp *ionic_qp = to_ionic_qp(qp);
 
 	if (qp->counter) {
+		struct ionic_ibdev *dev = to_ionic_ibdev(qp->counter->device);
+		struct ionic_counter *ionic_counter =
+			(struct ionic_counter *)xa_load(&dev->counter_stats->xa_counters,
+							qp->counter->id);
+		ionic_counter->num_qps--;
 		list_del(&ionic_qp->qp_list_counter);
 		qp->counter = NULL;
 	}
@@ -452,28 +470,33 @@ static const struct ib_device_ops ionic_counter_stats_ops = {
 void ionic_stats_init(struct ionic_ibdev *dev)
 {
 	int rc;
+	u16 stats_type = cpu_to_le16(dev->ident->rdma.stats_type);
 
-	rc = ionic_init_hw_stats(dev);
-	if (rc)
-		netdev_dbg(dev->ndev, "ionic_rdma: Failed to init hw stats\n");
-	else
-		ib_set_device_ops(&dev->ibdev, &ionic_hw_stats_ops);
-
-	dev->counter_stats = kzalloc(sizeof(*dev->counter_stats), GFP_KERNEL);
-	if (!dev->counter_stats)
-		return;
-
-	rc = ionic_alloc_counters(dev);
-	if (rc) {
-		netdev_dbg(dev->ndev, "ionic_rdma: Failed to init counter stats\n");
-		kfree(dev->counter_stats);
-		dev->counter_stats = NULL;
-		return;
+	if (stats_type & IONIC_LIF_RDMA_STAT_GLOBAL) {
+		rc = ionic_init_hw_stats(dev);
+		if (rc)
+			netdev_dbg(dev->ndev, "ionic_rdma: Failed to init hw stats\n");
+		else
+			ib_set_device_ops(&dev->ibdev, &ionic_hw_stats_ops);
 	}
 
-	xa_init_flags(&dev->counter_stats->xa_counters, XA_FLAGS_ALLOC);
+	if (stats_type & IONIC_LIF_RDMA_STAT_QP) {
+		dev->counter_stats = kzalloc(sizeof(*dev->counter_stats), GFP_KERNEL);
+		if (!dev->counter_stats)
+			return;
 
-	ib_set_device_ops(&dev->ibdev, &ionic_counter_stats_ops);
+		rc = ionic_alloc_counters(dev);
+		if (rc) {
+			netdev_dbg(dev->ndev, "ionic_rdma: Failed to init counter stats\n");
+			kfree(dev->counter_stats);
+			dev->counter_stats = NULL;
+			return;
+		}
+
+		xa_init_flags(&dev->counter_stats->xa_counters, XA_FLAGS_ALLOC);
+
+		ib_set_device_ops(&dev->ibdev, &ionic_counter_stats_ops);
+	}
 }
 
 void ionic_stats_cleanup(struct ionic_ibdev *dev)

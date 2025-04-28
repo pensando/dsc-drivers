@@ -245,3 +245,12 @@ As usual, if the Linux headers are elsewhere, add the appropriate -C magic:
    - add more expdb size support
    - other fixes for express doorbell
 
+25-04-28 - ionic and ionic_rdma updates for 25.04.5-003
+ - ETH:
+   - fixes for better RDMA support
+   - various bits of code cleaning and kernel/distro compatability
+ - RDMA:
+   - improved crypto support
+   - CMB use overridable from userspace
+   - fixes from testing
+   - various bits of code cleaning and kernel/distro compatability

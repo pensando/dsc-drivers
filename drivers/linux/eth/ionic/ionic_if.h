@@ -78,6 +78,7 @@ enum ionic_cmd_opcode {
 	IONIC_CMD_DISCOVER_CMB			= 80,
 
 	IONIC_CMD_RESERVED_98			= 98,
+	IONIC_CMD_RESERVED_99			= 99,
 
 	/* UPT command */
 	IONIC_CMD_UPT_MESSAGE			= 100,
@@ -2255,11 +2256,20 @@ struct ionic_discover_cmb_comp {
 IONIC_CHECK_COMP_LENGTH(ionic_discover_cmb_comp);
 
 #define IONIC_MAX_CMB_REGIONS	16
+#define IONIC_CMB_REGION_64KB_SHIFT	16
+
+enum ionic_cmb_type {
+	IONIC_CMB_TYPE_DEVMEM	= 0,
+	IONIC_CMB_TYPE_EXPDB64	= 1,
+	IONIC_CMB_TYPE_EXPDB128	= 2,
+	IONIC_CMB_TYPE_EXPDB256	= 3,
+	IONIC_CMB_TYPE_EXPDB512	= 4,
+};
 
 /**
  * union ionic_cmb_region - Configuration for CMB region
  * @bar_num:		CMB mapping number from FW
- * @cmb_type:		Type of CMB this region describes
+ * @cmb_type:		Type of CMB this region describes (enum ionic_cmb_type)
  * @rsvd:		Reserved
  * @offset:		Offset within BAR in 64KB pages
  * @length:		Length of the CMB region
@@ -2269,11 +2279,6 @@ union ionic_cmb_region {
 	struct {
 		u8	bar_num;
 		u8	cmb_type;
-#define IONIC_CMB_TYPE_DEVMEM	0
-#define IONIC_CMB_TYPE_EXPDB64	1
-#define IONIC_CMB_TYPE_EXPDB128	2
-#define IONIC_CMB_TYPE_EXPDB256	3
-#define IONIC_CMB_TYPE_EXPDB512	4
 		u8	rsvd[6];
 		__le32	offset;
 		__le32	length;
@@ -3588,19 +3593,13 @@ union ionic_adminq_comp {
 
 /* BAR0 */
 #define IONIC_BAR0_SIZE				0x8000
+#define IONIC_BAR2_SIZE				0x800000
 
 #define IONIC_BAR0_DEV_INFO_REGS_OFFSET		0x0000
 #define IONIC_BAR0_DEV_CMD_REGS_OFFSET		0x0800
 #define IONIC_BAR0_DEV_CMD_DATA_REGS_OFFSET	0x0c00
 #define IONIC_BAR0_INTR_STATUS_OFFSET		0x1000
 #define IONIC_BAR0_INTR_CTRL_OFFSET		0x2000
-
-/* BAR2 */
-#define IONIC_BAR2_SIZE				0x800000
-
-#define IONIC_BAR2_CMB_ENTRY_SIZE		0x800000
-#define IONIC_BAR2_CMB_ENTRY_64B_OFFSET		IONIC_BAR2_CMB_ENTRY_SIZE
-#define IONIC_BAR2_CMB_ENTRY_128B_OFFSET	(2 * IONIC_BAR2_CMB_ENTRY_SIZE)
 
 #define IONIC_DEV_CMD_DONE			0x00000001
 

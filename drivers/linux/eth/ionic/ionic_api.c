@@ -148,79 +148,31 @@ const union ionic_lif_identity *ionic_api_get_identity(void *handle,
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_identity);
 
-/* queuetype support level */
-static const u8 ionic_qtype_versions[IONIC_QTYPE_MAX] = {
-	[IONIC_QTYPE_ADMINQ]  = 0,   /* 0 = Base version with CQ support */
-	[IONIC_QTYPE_NOTIFYQ] = 0,   /* 0 = Base version */
-	[IONIC_QTYPE_RXQ]     = 2,   /* 0 = Base version with CQ+SG support
-				      * 1 =       ... with EQ
-				      * 2 =       ... with CMB rings
-				      */
-	[IONIC_QTYPE_TXQ]     = 3,   /* 0 = Base version with CQ+SG support
-				      * 1 =   ... with Tx SG version 1
-				      * 2 =       ... with EQ
-				      * 3 =       ... with CMB rings
-				      */
-};
-
-struct ionic_qtype_info ionic_api_get_queue_identity(void *handle, int qtype)
+int ionic_api_get_queue_identity(void *handle, int qtype, struct ionic_qtype_info *qti)
 {
-	union ionic_q_identity __iomem *q_ident;
 	struct ionic_lif *lif = handle;
-	struct ionic_qtype_info qti;
-	struct ionic_dev *idev;
-	struct ionic *ionic;
-	int err;
 
-	union ionic_dev_cmd cmd = {
-		.q_identify.opcode = IONIC_CMD_Q_IDENTIFY,
-		.q_identify.lif_type = cpu_to_le16(lif->lif_type),
-		.q_identify.type = qtype,
-		.q_identify.ver = ionic_qtype_versions[qtype],
-	};
+	memcpy(qti, &lif->qtype_info[qtype], sizeof(struct ionic_qtype_info));
 
-	ionic = lif->ionic;
-	idev = &lif->ionic->idev;
-	q_ident = (union ionic_q_identity __iomem *)&idev->dev_cmd_regs->data;
-
-	mutex_lock(&ionic->dev_cmd_lock);
-
-	ionic_dev_cmd_go(&ionic->idev, &cmd);
-	err = ionic_dev_cmd_wait(ionic, devcmd_timeout);
-
-	if (err)
-		netdev_warn(lif->netdev, "get_queue_identity: error %d\n", err);
-
-	qti.version   = ioread8(&q_ident->version);
-	qti.supported = ioread8(&q_ident->supported);
-	qti.features  = readq(&q_ident->features);
-	qti.desc_sz   = ioread16(&q_ident->desc_sz);
-	qti.comp_sz   = ioread16(&q_ident->comp_sz);
-	qti.sg_desc_sz   = ioread16(&q_ident->sg_desc_sz);
-	qti.max_sg_elems = ioread16(&q_ident->max_sg_elems);
-	qti.sg_desc_stride = ioread16(&q_ident->sg_desc_stride);
-
-	mutex_unlock(&ionic->dev_cmd_lock);
-
-	return qti;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_queue_identity);
 
 u8 ionic_api_get_expdb(void *handle)
 {
 	struct ionic_lif *lif = handle;
-	u8 ret = 0;
+	u8 expdb_support = 0;
 
 	if (lif->ionic->idev.phy_cmb_expdb64_pages)
-		ret |= IONIC_EXPDB_64B_WQE;
+		expdb_support |= IONIC_EXPDB_64B_WQE;
 	if (lif->ionic->idev.phy_cmb_expdb128_pages)
-		ret |= IONIC_EXPDB_128B_WQE;
+		expdb_support |= IONIC_EXPDB_128B_WQE;
 	if (lif->ionic->idev.phy_cmb_expdb256_pages)
-		ret |= IONIC_EXPDB_256B_WQE;
+		expdb_support |= IONIC_EXPDB_256B_WQE;
 	if (lif->ionic->idev.phy_cmb_expdb512_pages)
-		ret |= IONIC_EXPDB_512B_WQE;
+		expdb_support |= IONIC_EXPDB_512B_WQE;
 
-	return ret;
+	return expdb_support;
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_expdb);
 
@@ -270,9 +222,7 @@ EXPORT_SYMBOL_GPL(ionic_api_put_intr);
 int ionic_api_get_cmb(void *handle, u32 *pgid, phys_addr_t *pgaddr, int order,
 		      u8 stride_log2, bool *expdb)
 {
-	struct ionic_lif *lif = handle;
-
-	return ionic_get_cmb(lif, pgid, pgaddr, order, stride_log2, expdb);
+	return ionic_get_cmb(handle, pgid, pgaddr, order, stride_log2, expdb);
 }
 EXPORT_SYMBOL_GPL(ionic_api_get_cmb);
 

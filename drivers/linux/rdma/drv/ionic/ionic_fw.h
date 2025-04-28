@@ -667,142 +667,288 @@ static inline int ionic_v1_use_spec_sge(int min_sge, int spec)
 	return spec;
 }
 
+struct ionic_admin_stats_hdr {
+	__le64		dma_addr;
+	__le32		length;
+	__le32		id_ver;
+	__u8		type_state;
+} __packed;
+
+#define IONIC_ADMIN_STATS_HDRS_IN_V1_LEN 17
+static_assert(sizeof(struct ionic_admin_stats_hdr) == IONIC_ADMIN_STATS_HDRS_IN_V1_LEN);
+
+struct ionic_admin_create_ah {
+	__le64		dma_addr;
+	__le32		length;
+	__le32		pd_id;
+	__le32		id_ver;
+	__le16		dbid_flags;
+	__u8		csum_profile;
+	__u8		crypto;
+} __packed;
+
+#define IONIC_ADMIN_CREATE_AH_IN_V1_LEN 24
+static_assert(sizeof(struct ionic_admin_create_ah) == IONIC_ADMIN_CREATE_AH_IN_V1_LEN);
+
+struct ionic_admin_destroy_ah {
+	__le32		ah_id;
+} __packed;
+
+#define IONIC_ADMIN_DESTROY_AH_IN_V1_LEN 4
+static_assert(sizeof(struct ionic_admin_destroy_ah) == IONIC_ADMIN_DESTROY_AH_IN_V1_LEN);
+
+struct ionic_admin_query_ah {
+	__le64		dma_addr;
+} __packed;
+
+#define IONIC_ADMIN_QUERY_AH_IN_V1_LEN 8
+static_assert(sizeof(struct ionic_admin_query_ah) == IONIC_ADMIN_QUERY_AH_IN_V1_LEN);
+
+struct ionic_admin_create_mr {
+	__le64		va;
+	__le64		length;
+	__le32		pd_id;
+	__le32		id_ver;
+	__le32		tbl_index;
+	__le32		map_count;
+	__le64		dma_addr;
+	__le16		dbid_flags;
+	__u8		pt_type;
+	__u8		dir_size_log2;
+	__u8		page_size_log2;
+} __packed;
+
+#define IONIC_ADMIN_CREATE_MR_IN_V1_LEN 45
+static_assert(sizeof(struct ionic_admin_create_mr) == IONIC_ADMIN_CREATE_MR_IN_V1_LEN);
+
+struct ionic_admin_destroy_mr {
+	__le32		mr_id;
+} __packed;
+
+#define IONIC_ADMIN_DESTROY_MR_IN_V1_LEN 4
+static_assert(sizeof(struct ionic_admin_destroy_mr) == IONIC_ADMIN_DESTROY_MR_IN_V1_LEN);
+
+struct ionic_admin_create_cq {
+	__le32		eq_id;
+	__u8		depth_log2;
+	__u8		stride_log2;
+	__u8		dir_size_log2_rsvd;
+	__u8		page_size_log2;
+	__le32		cq_flags;
+	__le32		id_ver;
+	__le32		tbl_index;
+	__le32		map_count;
+	__le64		dma_addr;
+	__le16		dbid_flags;
+} __packed;
+
+#define IONIC_ADMIN_CREATE_CQ_IN_V1_LEN 34
+static_assert(sizeof(struct ionic_admin_create_cq) == IONIC_ADMIN_CREATE_CQ_IN_V1_LEN);
+
+struct ionic_admin_destroy_cq {
+	__le32		cq_id;
+} __packed;
+
+#define IONIC_ADMIN_DESTROY_CQ_IN_V1_LEN 4
+static_assert(sizeof(struct ionic_admin_destroy_cq) == IONIC_ADMIN_DESTROY_CQ_IN_V1_LEN);
+
+struct ionic_admin_create_qp {
+	__le32		pd_id;
+	__be32		priv_flags;
+	__le32		sq_cq_id;
+	__u8		sq_depth_log2;
+	__u8		sq_stride_log2;
+	__u8		sq_dir_size_log2_rsvd;
+	__u8		sq_page_size_log2;
+	__le32		sq_tbl_index_xrcd_id;
+	__le32		sq_map_count;
+	__le64		sq_dma_addr;
+	__le32		rq_cq_id;
+	__u8		rq_depth_log2;
+	__u8		rq_stride_log2;
+	__u8		rq_dir_size_log2_rsvd;
+	__u8		rq_page_size_log2;
+	__le32		rq_tbl_index_srq_id;
+	__le32		rq_map_count;
+	__le64		rq_dma_addr;
+	__le32		id_ver;
+	__le16		dbid_flags;
+	__u8		type_state;
+	__u8		rsvd;
+} __packed;
+
+#define IONIC_ADMIN_CREATE_QP_IN_V1_LEN 64
+static_assert(sizeof(struct ionic_admin_create_qp) == IONIC_ADMIN_CREATE_QP_IN_V1_LEN);
+
+struct ionic_admin_destroy_qp {
+	__le32		qp_id;
+} __packed;
+
+#define IONIC_ADMIN_DESTROY_QP_IN_V1_LEN 4
+static_assert(sizeof(struct ionic_admin_destroy_qp) == IONIC_ADMIN_DESTROY_QP_IN_V1_LEN);
+
+struct ionic_admin_mod_qp {
+	__be32		attr_mask;
+	__u8		dcqcn_profile;
+	__u8		tfp_csum_profile;
+	__be16		access_flags;
+	__le32		rq_psn;
+	__le32		sq_psn;
+	__le32		qkey_dest_qpn;
+	__le32		rate_limit_kbps;
+	__u8		pmtu;
+	__u8		retry;
+	__u8		rnr_timer;
+	__u8		retry_timeout;
+	__u8		rsq_depth;
+	__u8		rrq_depth;
+	__le16		pkey_id;
+	__le32		ah_id_len;
+	__u8		en_pcp;
+	__u8		ip_dscp;
+	__u8		mrc_num_paths;
+	__u8		type_state;
+	union {
+		struct {
+			__le16		mrc_base_sport;
+			__le16		rsvd1;
+		};
+		__le32		rrq_index;
+	};
+	__le32		rsq_index;
+	__le64		dma_addr;
+	__le32		id_ver;
+} __packed;
+
+#define IONIC_ADMIN_MODIFY_QP_IN_V1_LEN 60
+static_assert(sizeof(struct ionic_admin_mod_qp) == IONIC_ADMIN_MODIFY_QP_IN_V1_LEN);
+
+struct ionic_admin_query_qp {
+	__le64		hdr_dma_addr;
+	__le64		sq_dma_addr;
+	__le64		rq_dma_addr;
+	__le32		ah_id;
+	__le32		id_ver;
+	__le16		dbid_flags;
+} __packed;
+
+#define IONIC_ADMIN_QUERY_QP_IN_V1_LEN 34
+static_assert(sizeof(struct ionic_admin_query_qp) == IONIC_ADMIN_QUERY_QP_IN_V1_LEN);
+
+struct ionic_admin_mod_dcqcn {
+	__u8		np_incp_802p_prio;
+	__u8		np_cnp_dscp;
+	__be16		rp_dce_tcp_g;
+	__be32		rp_dce_tcp_rtt;
+	__be32		rp_rate_reduce_monitor_period;
+	__be32		rp_rate_to_set_on_first_cnp;
+	__be32		rp_min_rate;
+	__be16		rp_initial_alpha_value;
+	__u8		rp_gd;
+	__u8		rp_min_dec_fac;
+	__u8		rp_clamp_flags;
+	__u8		rp_threshold;
+	__be16		rp_time_reset;
+	__be32		rp_qp_rate;
+	__be32		rp_byte_reset;
+	__be32		rp_ai_rate;
+	__be32		rp_hai_rate;
+	__le32		id_ver;
+	__be64		rp_token_bucket_size;
+} __packed;
+
+#define IONIC_ADMIN_MODIFY_DCQCN_IN_V1_LEN 56
+static_assert(sizeof(struct ionic_admin_mod_dcqcn) == IONIC_ADMIN_MODIFY_DCQCN_IN_V1_LEN);
+
+struct ionic_admin_crypto_query_caps {
+	__le64		dma_addr;
+} __packed;
+
+#define IONIC_ADMIN_CRYPTO_QUERY_CAPS_IN_V1_LEN 8
+static_assert(sizeof(struct ionic_admin_crypto_query_caps) ==
+		IONIC_ADMIN_CRYPTO_QUERY_CAPS_IN_V1_LEN);
+
+struct ionic_admin_add_sa {
+	__le64		sa_idx_dma_addr;
+	__le64		sa_data_dma_addr;
+} __packed;
+
+#define IONIC_ADMIN_ADD_SA_IN_V1_LEN 16
+static_assert(sizeof(struct ionic_admin_add_sa) == IONIC_ADMIN_ADD_SA_IN_V1_LEN);
+
+struct ionic_admin_query_sa {
+	__u8		dir;
+	__le16		sa_idx;
+	__le64		dma_addr;
+} __packed;
+
+#define IONIC_ADMIN_QUERY_SA_IN_V1_LEN 11
+static_assert(sizeof(struct ionic_admin_query_sa) == IONIC_ADMIN_QUERY_SA_IN_V1_LEN);
+
+struct ionic_admin_delete_sa {
+	__u8		protocol;
+	__u8		type_state;
+	__le32		id_ver;
+} __packed;
+
+#define IONIC_ADMIN_DELETE_SA_IN_V1_LEN 6
+static_assert(sizeof(struct ionic_admin_delete_sa) == IONIC_ADMIN_DELETE_SA_IN_V1_LEN);
+
+struct ionic_admin_alloc_inbound_spi {
+	__u8		protocol;
+	__le64		spi_dma_addr;
+} __packed;
+
+#define IONIC_ADMIN_ALLOC_INBOUND_SPI_IN_V1_LEN 9
+static_assert(sizeof(struct ionic_admin_alloc_inbound_spi) ==
+		IONIC_ADMIN_ALLOC_INBOUND_SPI_IN_V1_LEN);
+
+struct ionic_admin_dealloc_inbound_spi {
+	__u8		type_state;
+	__le32		id_ver;
+} __packed;
+
+#define IONIC_ADMIN_DEALLOC_INBOUND_SPI_IN_V1_LEN 5
+static_assert(sizeof(struct ionic_admin_dealloc_inbound_spi) ==
+		IONIC_ADMIN_DEALLOC_INBOUND_SPI_IN_V1_LEN);
+
+struct ionic_admin_wqe_stride {
+	__u8 data[64];
+};
+
+#define ADMIN_WQE_STRIDE	64
+static_assert(sizeof(struct ionic_admin_wqe_stride) == ADMIN_WQE_STRIDE);
+
+#define ADMIN_WQE_HDR_LEN	4
+
 /* admin queue v1 wqe */
 struct ionic_v1_admin_wqe {
 	__u8				op;
-	__u8				type_state;
-	__le16				dbid_flags;
-	__le32				id_ver;
+	__u8				rsvd;
+	__le16				len;
+
 	union {
-		struct {
-			__le64		dma_addr;
-			__le32		length;
-			__u8		rsvd[44];
-		} stats;
-		struct {
-			__le64		dma_addr;
-			__le32		length;
-			__le32		pd_id;
-			__u8		csum_profile;
-			__u8		rsvd[39];
-		} ah;
-		struct {
-			__le64		dma_addr;
-			__u8		rsvd[48];
-		} query_ah;
-		struct {
-			__le64		va;
-			__le64		length;
-			__le32		pd_id;
-			__u8		pt_type;
-			__u8		rsvd[17];
-			__u8		dir_size_log2;
-			__u8		page_size_log2;
-			__le32		tbl_index;
-			__le32		map_count;
-			__le64		dma_addr;
-		} mr;
-		struct {
-			__le32		eq_id;
-			__u8		depth_log2;
-			__u8		stride_log2;
-			__u8		dir_size_log2_rsvd;
-			__u8		page_size_log2;
-			__le32		cq_flags;
-			__u8		rsvd[28];
-			__le32		tbl_index;
-			__le32		map_count;
-			__le64		dma_addr;
-		} cq;
-		struct {
-			__le32		pd_id;
-			__be32		priv_flags;
-			__le32		sq_cq_id;
-			__u8		sq_depth_log2;
-			__u8		sq_stride_log2;
-			__u8		sq_dir_size_log2_rsvd;
-			__u8		sq_page_size_log2;
-			__le32		sq_tbl_index_xrcd_id;
-			__le32		sq_map_count;
-			__le64		sq_dma_addr;
-			__le32		rq_cq_id;
-			__u8		rq_depth_log2;
-			__u8		rq_stride_log2;
-			__u8		rq_dir_size_log2_rsvd;
-			__u8		rq_page_size_log2;
-			__le32		rq_tbl_index_srq_id;
-			__le32		rq_map_count;
-			__le64		rq_dma_addr;
-		} qp;
-		struct {
-			__be32		attr_mask;
-			__u8		dcqcn_profile;
-			__u8		tfp_csum_profile;
-			__be16		access_flags;
-			__le32		rq_psn;
-			__le32		sq_psn;
-			__le32		qkey_dest_qpn;
-			__le32		rate_limit_kbps;
-			__u8		pmtu;
-			__u8		retry;
-			__u8		rnr_timer;
-			__u8		retry_timeout;
-			__u8		rsq_depth;
-			__u8		rrq_depth;
-			__le16		pkey_id;
-			__le32		ah_id_len;
-			__u8		en_pcp;
-			__u8		ip_dscp;
-			__u8		mrc_num_paths;
-			__u8		rsvd0;
-			union {
-				struct {
-					__le16		mrc_base_sport;
-					__le16		rsvd1;
-				};
-				__le32		rrq_index;
-			};
-			__le32		rsq_index;
-			__le64		dma_addr;
-		} mod_qp;
-		struct {
-			__le64		hdr_dma_addr;
-			__le32		ah_id;
-			__u8		rsvd[28];
-			__le64		sq_dma_addr;
-			__le64		rq_dma_addr;
-		} query_qp;
-		struct {
-			__u8		np_incp_802p_prio;
-			__u8		np_cnp_dscp;
-			__u8		np_rsvd[4];
-			__be16		rp_dce_tcp_g;
-			__be32		rp_dce_tcp_rtt;
-			__be32		rp_rate_reduce_monitor_period;
-			__be32		rp_rate_to_set_on_first_cnp;
-			__be32		rp_min_rate;
-			__be16		rp_initial_alpha_value;
-			__u8		rp_gd;
-			__u8		rp_min_dec_fac;
-			__u8		rp_clamp_flags;
-			__u8		rp_threshold;
-			__be16		rp_time_reset;
-			__be32		rp_qp_rate;
-			__be32		rp_byte_reset;
-			__be32		rp_ai_rate;
-			__be32		rp_hai_rate;
-			__be64		rp_token_bucket_size;
-		} mod_dcqcn;
-		struct {
-			__le64		sa_idx_dma_addr;
-			__le64		sa_data_dma_addr;
-			__u8		rsvd[40];
-		} add_sa;
-		struct {
-			__u8		protocol;
-			__u8		rsvd[55];
-		} delete_sa;
-	};
+		struct ionic_admin_stats_hdr stats;
+		struct ionic_admin_create_ah create_ah;
+		struct ionic_admin_destroy_ah destroy_ah;
+		struct ionic_admin_query_ah query_ah;
+		struct ionic_admin_create_mr create_mr;
+		struct ionic_admin_destroy_mr destroy_mr;
+		struct ionic_admin_create_cq create_cq;
+		struct ionic_admin_destroy_cq destroy_cq;
+		struct ionic_admin_create_qp create_qp;
+		struct ionic_admin_destroy_qp destroy_qp;
+		struct ionic_admin_mod_qp mod_qp;
+		struct ionic_admin_query_qp query_qp;
+		struct ionic_admin_mod_dcqcn mod_dcqcn;
+		struct ionic_admin_crypto_query_caps query_caps;
+		struct ionic_admin_add_sa add_sa;
+		struct ionic_admin_query_sa query_sa;
+		struct ionic_admin_delete_sa delete_sa;
+		struct ionic_admin_alloc_inbound_spi alloc_ib_spi;
+		struct ionic_admin_dealloc_inbound_spi dealloc_ib_spi;
+		struct ionic_admin_wqe_stride wqe_stride;
+	} cmd;
 };
 
 enum ionic_v1_dcqcn_flags {
@@ -848,6 +994,12 @@ struct ionic_v1_admin_query_qp_rq {
 	__be32				sq_psn;
 	__be16				access_perms_flags;
 	__be16				rsvd;
+};
+
+struct ionic_v1_admin_crypto_params {
+	__u8				crypto_en;
+	__u8				crypto_ext_sa;
+	__le16				crypto_sa_id;
 };
 
 struct ionic_v1_admin_crypto_add_sa {
@@ -1031,6 +1183,7 @@ enum ionic_v1_admin_status {
 	IONIC_V1_ASTS_BAD_STATE,
 	IONIC_V1_ASTS_BAD_TYPE,
 	IONIC_V1_ASTS_BAD_ATTR,
+	IONIC_V1_ASTS_MSG_TOO_BIG,
 };
 
 /* event queue v1 eqe */
@@ -1081,6 +1234,10 @@ enum ionic_tfp_csum_profiles {
 	IONIC_TFP_CSUM_PROF_ETH_QTAG_IPV4_UDP_ESP_UDP			= 10,
 	IONIC_TFP_CSUM_PROF_ETH_QTAG_IPV6_ESP_UDP			= 11,
 	IONIC_TFP_CSUM_PROF_ETH_QTAG_IPV4_UDP_CSUM			= 12,
+	IONIC_TFP_CSUM_PROF_CRYPTO_ETH_IPV4_UDP				= 13,
+	IONIC_TFP_CSUM_PROF_CRYPTO_ETH_QTAG_IPV4_UDP			= 14,
+	IONIC_TFP_CSUM_PROF_CRYPTO_ETH_IPV6_UDP				= 15,
+	IONIC_TFP_CSUM_PROF_CRYPTO_ETH_QTAG_IPV6_UDP			= 16,
 };
 
 enum ionic_v1_crypto_sa_dir {

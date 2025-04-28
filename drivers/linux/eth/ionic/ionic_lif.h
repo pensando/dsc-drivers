@@ -286,6 +286,7 @@ struct ionic_lif {
 
 #ifdef CONFIG_AUXILIARY_BUS
 	struct ionic_aux_dev *ionic_adev;
+	struct mutex adev_lock;		/* lock for aux_dev actions */
 #endif
 	struct ionic_rx_filters rx_filters;
 	u32 rx_coalesce_usecs;		/* what the user asked for */
@@ -302,9 +303,6 @@ struct ionic_lif {
 
 	struct dentry *dentry;
 	struct bpf_prog *xdp_prog;
-#ifdef HAVE_IONIC_PBAPI
-	struct dma_buf_attachment *pbat;
-#endif
 
 	__be32 int_mnic_ip;
 	u8 int_mnic_subnet;

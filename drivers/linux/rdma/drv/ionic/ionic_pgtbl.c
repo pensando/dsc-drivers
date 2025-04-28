@@ -97,7 +97,7 @@ out:
 }
 #endif
 
-int ionic_pgtbl_init(struct ionic_ibdev *dev, struct ionic_tbl_res *res,
+int ionic_pgtbl_init(struct ionic_ibdev *dev,
 		     struct ionic_tbl_buf *buf, struct ib_umem *umem,
 		     dma_addr_t dma, int limit, u64 page_size)
 {
@@ -115,10 +115,6 @@ int ionic_pgtbl_init(struct ionic_ibdev *dev, struct ionic_tbl_res *res,
 
 	if (limit < 1)
 		return -EINVAL;
-
-	res->tbl_order = ionic_res_order(limit, dev->pte_stride,
-					 dev->cl_stride);
-	res->tbl_pos = 0;
 
 	buf->tbl_limit = limit;
 	buf->tbl_pages = 0;
@@ -148,21 +144,10 @@ int ionic_pgtbl_init(struct ionic_ibdev *dev, struct ionic_tbl_res *res,
 			buf->tbl_limit =
 				1 + ALIGN(limit - 1, BIT(dev->cl_stride -
 							 dev->pte_stride));
-
-			/* and recalculate the reservation dimensions */
-			res->tbl_order = ionic_res_order(buf->tbl_limit,
-							 dev->pte_stride,
-							 dev->cl_stride);
 		}
-
-		rc = ionic_get_res(dev, res);
-		if (rc)
-			goto err_res;
 
 		/* limit for pte reservation should not affect anything else */
 		buf->tbl_limit = limit;
-	} else {
-		res->tbl_order = IONIC_RES_INVALID;
 	}
 
 	if (limit > 1) {
@@ -202,8 +187,6 @@ err_dma:
 		kfree(buf->tbl_buf);
 	}
 err_buf:
-	ionic_put_res(dev, res);
-err_res:
 	buf->tbl_buf = NULL;
 	buf->tbl_limit = 0;
 	buf->tbl_pages = 0;
