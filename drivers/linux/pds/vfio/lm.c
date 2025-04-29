@@ -7,6 +7,7 @@
 #include <linux/highmem.h>
 #include <linux/vfio.h>
 #include <linux/vfio_pci_core.h>
+#include <linux/version.h>
 
 #include "vfio_dev.h"
 #include "cmds.h"
@@ -259,6 +260,12 @@ out_unlock:
 	mutex_unlock(&lm_file->lock);
 	return done;
 }
+
+#if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
+#ifndef no_llseek
+#define no_llseek NULL
+#endif
+#endif
 
 static const struct file_operations pds_vfio_save_fops = {
 	.owner = THIS_MODULE,

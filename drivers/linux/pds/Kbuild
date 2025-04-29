@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 Advanced Micro Devices, Inc
+
+subdir-ccflags-y := -I$(src)/include/
+
+obj-$(CONFIG_PDS_CORE) += core/
+obj-$(CONFIG_PDS_VFIO_PCI) += vfio/
+obj-$(CONFIG_PDS_VDPA) += vdpa/
+obj-$(CONFIG_FWCTL_PDS) += fwctl/

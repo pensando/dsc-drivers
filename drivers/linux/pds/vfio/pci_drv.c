@@ -183,14 +183,20 @@ static struct pci_driver pds_vfio_pci_driver = {
 	.probe = pds_vfio_pci_probe,
 	.remove = pds_vfio_pci_remove,
 	.err_handler = &pds_vfio_pci_err_handlers,
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0) )
 	.driver_managed_dma = true,
+#endif
 };
 
 module_pci_driver(pds_vfio_pci_driver);
 
-#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(6,7,0) )
+#if (KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE)
+MODULE_IMPORT_NS("IOMMUFD");
+#elif (KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE)
 MODULE_IMPORT_NS(IOMMUFD);
 #endif
+
 MODULE_DESCRIPTION(PDS_VFIO_DRV_DESCRIPTION);
 MODULE_AUTHOR("Brett Creeley <brett.creeley@amd.com>");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(PDS_DRV_VER);

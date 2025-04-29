@@ -47,6 +47,7 @@ enum pds_core_vif_types {
 #define PDS_FWCTL_DEV_NAME	PDS_CORE_DRV_NAME "." PDS_DEV_TYPE_FWCTL_STR
 
 struct pdsc;
+struct notifier_block;
 
 int pdsc_register_notify(struct notifier_block *nb);
 void pdsc_unregister_notify(struct notifier_block *nb);
