@@ -3,6 +3,7 @@
 
 #include <linux/interval_tree.h>
 #include <linux/vfio.h>
+#include <linux/vmalloc.h>
 
 #include <linux/pds/pds_common.h>
 #include <linux/pds/pds_core_if.h>
@@ -536,6 +537,7 @@ static int pds_vfio_dirty_process_bitmaps(struct pds_vfio_pci_device *pds_vfio,
 	u32 bmp_offset_bit;
 	__le64 *seq, *ack;
 	int dword_count;
+	u8 bit_i;
 	int i;
 
 	dword_count = len_bytes / sizeof(u64);
@@ -545,7 +547,6 @@ static int pds_vfio_dirty_process_bitmaps(struct pds_vfio_pci_device *pds_vfio,
 
 	for (i = 0; i < dword_count; i++) {
 		u64 xor = le64_to_cpu(seq[i]) ^ le64_to_cpu(ack[i]);
-		u8 bit_i;
 
 		/* prepare for next write_ack call */
 		ack[i] = seq[i];

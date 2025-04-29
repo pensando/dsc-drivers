@@ -1332,7 +1332,7 @@ struct pds_fwctl_query_cmd {
  * @status: Status of the query command
  * @comp_index: Completion index in little-endian format
  * @version: Version of the query data structure returned by firmware. This
- * 		 should be less than or equal to the version supported by the driver.
+ *	should be less than or equal to the version supported by the driver.
  * @color: Color bit indicating the state of the completion
  */
 struct pds_fwctl_query_comp {

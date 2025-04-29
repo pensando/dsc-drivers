@@ -11,6 +11,7 @@
 MODULE_DESCRIPTION(PDSC_DRV_DESCRIPTION);
 MODULE_AUTHOR("Advanced Micro Devices, Inc");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(PDS_DRV_VER);
 
 /* Supported devices */
 static const struct pci_device_id pdsc_id_table[] = {

@@ -2,6 +2,7 @@
 /* Copyright(c) 2023 Advanced Micro Devices, Inc */
 
 #include "core.h"
+#include <linux/vmalloc.h>
 
 /* The worst case wait for the install activity is about 25 minutes when
  * installing a new CPLD, which is very seldom.  Normal is about 30-35
@@ -23,7 +24,7 @@ static int pdsc_devcmd_fw_download_locked(struct pdsc *pdsc, u64 addr,
 		.fw_download.addr = cpu_to_le64(addr),
 		.fw_download.length = cpu_to_le32(length),
 	};
-	union pds_core_dev_comp comp;
+	union pds_core_dev_comp comp = {};
 
 	return pdsc_devcmd_locked(pdsc, &cmd, &comp, pdsc->devcmd_timeout);
 }
@@ -95,8 +96,9 @@ static int pdsc_fw_status_long_wait(struct pdsc *pdsc,
 	return err;
 }
 
-int pdsc_firmware_update(struct pdsc *pdsc, const struct firmware *fw,
-			 struct netlink_ext_ack *extack)
+static int pdsc_legacy_firmware_update(struct pdsc *pdsc,
+				       const struct firmware *fw,
+				       struct netlink_ext_ack *extack)
 {
 	u32 buf_sz, copy_sz, offset;
 	struct devlink *dl;
@@ -194,4 +196,11 @@ err_out:
 		devlink_flash_update_status_notify(dl, "Flash done",
 						   NULL, 0, 0);
 	return err;
+}
+
+int pdsc_firmware_update(struct pdsc *pdsc,
+			 struct devlink_flash_update_params *params,
+			 struct netlink_ext_ack *extack)
+{
+	return pdsc_legacy_firmware_update(pdsc, params->fw, extack);
 }

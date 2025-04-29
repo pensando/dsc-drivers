@@ -23,7 +23,7 @@
 #define PDS_CORE_BAR0_INTR_CTRL_OFFSET		0x2000
 #define PDS_CORE_DEV_CMD_DONE			0x00000001
 
-#define PDS_CORE_DEVCMD_TIMEOUT			5
+#define PDS_CORE_DEVCMD_TIMEOUT			10
 
 #define PDS_CORE_CLIENT_ID			0
 #define PDS_CORE_ASIC_TYPE_CAPRI		0
@@ -280,6 +280,7 @@ enum pds_core_fw_slot {
 	PDS_CORE_FW_SLOT_A	    = 1,
 	PDS_CORE_FW_SLOT_B          = 2,
 	PDS_CORE_FW_SLOT_GOLD       = 3,
+	PDS_CORE_FW_SLOT_MAX		= 0xff
 };
 
 /**

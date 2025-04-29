@@ -167,8 +167,10 @@ static void pdsc_q_map(struct pdsc_queue *q, void *base, dma_addr_t base_pa)
 	q->base = base;
 	q->base_pa = base_pa;
 
-	for (i = 0, cur = q->info; i < q->num_descs; i++, cur++)
+	for (i = 0, cur = q->info; i < q->num_descs; i++, cur++) {
 		cur->desc = base + (i * q->desc_size);
+		init_completion(&cur->completion);
+	}
 }
 
 static void pdsc_cq_map(struct pdsc_cq *cq, void *base, dma_addr_t base_pa)
@@ -618,6 +620,13 @@ static void pdsc_check_pci_health(struct pdsc *pdsc)
 	if (fw_status != PDS_RC_BAD_PCI)
 		return;
 
+	/* if fw_reporter is cleared then we're in the probe or remove
+	 * path and the PCI mutex is already being held so don't fire
+	 * off a reset request.
+	 */
+	if (!pdsc->fw_reporter)
+		return;
+
 	/* prevent deadlock between pdsc_reset_prepare and pdsc_health_thread */
 	queue_work(pdsc->wq, &pdsc->pci_reset_work);
 }
@@ -638,7 +647,7 @@ void pdsc_health_thread(struct work_struct *work)
 
 	healthy = pdsc_is_fw_good(pdsc);
 	// dev_dbg(pdsc->dev, "%s: health %d fw_status %#02x fw_heartbeat %d\n",
-	// 	__func__, healthy, pdsc->fw_status, pdsc->last_hb);
+	//	__func__, healthy, pdsc->fw_status, pdsc->last_hb);
 
 	if (test_bit(PDSC_S_FW_DEAD, &pdsc->state)) {
 		if (healthy)
