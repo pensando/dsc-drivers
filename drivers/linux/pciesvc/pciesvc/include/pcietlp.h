@@ -143,73 +143,79 @@ typedef struct pcie_tlp_cfg_s {
     u_int32_t reg:8;            /* register number */
 } __attribute__((packed)) pcie_tlp_cfg_t;
 
-typedef struct pcie_tlp_mem32_s {
-    /* dword 0 */
-    u_int32_t type:8;           /* transaction type */
+typedef union pcie_tlp_mem32_u {
+    struct {
+        /* dword 0 */
+        u_int32_t type:8;       /* transaction type */
 
-    u_int32_t th:1;             /* tlp hint */
-    u_int32_t ln:1;             /* lightweight notification */
-    u_int32_t attr_hi:1;        /* attributes[2] */
-    u_int32_t t8:1;             /* tag[8] */
-    u_int32_t tc:3;             /* traffic class */
-    u_int32_t t9:1;             /* tag[9] */
+        u_int32_t th:1;         /* tlp hint */
+        u_int32_t ln:1;         /* lightweight notification */
+        u_int32_t attr_hi:1;    /* attributes[2] */
+        u_int32_t t8:1;         /* tag[8] */
+        u_int32_t tc:3;         /* traffic class */
+        u_int32_t t9:1;         /* tag[9] */
 
-    u_int32_t len_hi:2;         /* length[8:9] (dw) */
-    u_int32_t at:2;             /* at[0:1] */
-    u_int32_t attr_lo:2;        /* attributes[0:1] */
-    u_int32_t ep:1;             /* error poisoned */
-    u_int32_t td:1;             /* tlp digest */
+        u_int32_t len_hi:2;     /* length[8:9] (dw) */
+        u_int32_t at:2;         /* at[0:1] */
+        u_int32_t attr_lo:2;    /* attributes[0:1] */
+        u_int32_t ep:1;         /* error poisoned */
+        u_int32_t td:1;         /* tlp digest */
 
-    u_int32_t len_lo:8;         /* length[0:7] (dw) */
+        u_int32_t len_lo:8;     /* length[0:7] (dw) */
 
-    /* dword 1 */
-    u_int32_t reqid:16;         /* requester id */
+        /* dword 1 */
+        u_int32_t reqid:16;     /* requester id */
 
-    u_int32_t tag:8;            /* transaction tag */
+        u_int32_t tag:8;        /* transaction tag */
 
-    u_int32_t fbe:4;            /* first dw byte enable */
-    u_int32_t lbe:4;            /* last dw byte enable */
+        u_int32_t fbe:4;        /* first dw byte enable */
+        u_int32_t lbe:4;        /* last dw byte enable */
 
-    /* dword 2 */
-    u_int32_t addr;             /* address[31:2] */
-} __attribute__((packed)) pcie_tlp_mem32_t;
+        /* dword 2 */
+        u_int32_t addr;         /* address[31:2] */
+    } __attribute__((packed));
+    u_int32_t dw[3];
+} pcie_tlp_mem32_t;
 
 /* I/O similar to mem32 */
 typedef pcie_tlp_mem32_t pcie_tlp_io_t;
 
-typedef struct pcie_tlp_mem64_s {
-    /* dword 0 */
-    u_int32_t type:8;           /* transaction type */
+typedef union pcie_tlp_mem64_u {
+    struct {
+        /* dword 0 */
+        u_int32_t type:8;       /* transaction type */
 
-    u_int32_t th:1;             /* tlp hint */
-    u_int32_t ln:1;             /* lightweight notification */
-    u_int32_t attr_hi:1;        /* attributes[2] */
-    u_int32_t t8:1;             /* tag[8] */
-    u_int32_t tc:3;             /* traffic class */
-    u_int32_t t9:1;             /* tag[9] */
+        u_int32_t th:1;         /* tlp hint */
+        u_int32_t ln:1;         /* lightweight notification */
+        u_int32_t attr_hi:1;    /* attributes[2] */
+        u_int32_t t8:1;         /* tag[8] */
+        u_int32_t tc:3;         /* traffic class */
+        u_int32_t t9:1;         /* tag[9] */
 
-    u_int32_t len_hi:2;         /* length[8:9] (dw) */
-    u_int32_t at:2;             /* at[0:1] */
-    u_int32_t attr_lo:2;        /* attributes[0:1] */
-    u_int32_t ep:1;             /* error poisoned */
-    u_int32_t td:1;             /* tlp digest */
+        u_int32_t len_hi:2;     /* length[8:9] (dw) */
+        u_int32_t at:2;         /* at[0:1] */
+        u_int32_t attr_lo:2;    /* attributes[0:1] */
+        u_int32_t ep:1;         /* error poisoned */
+        u_int32_t td:1;         /* tlp digest */
 
-    u_int32_t len_lo:8;         /* length[0:7] (dw) */
+        u_int32_t len_lo:8;     /* length[0:7] (dw) */
 
-    /* dword 1 */
-    u_int32_t reqid:16;         /* requester id */
+        /* dword 1 */
+        u_int32_t reqid:16;     /* requester id */
 
-    u_int32_t tag:8;            /* transaction tag */
+        u_int32_t tag:8;        /* transaction tag */
 
-    u_int32_t fbe:4;            /* first dw byte enable */
-    u_int32_t lbe:4;            /* last dw byte enable */
+        u_int32_t fbe:4;        /* first dw byte enable */
+        u_int32_t lbe:4;        /* last dw byte enable */
 
-    /* dword 2 */
-    u_int32_t addr_hi;          /* address[63:32] */
+        /* dword 2 */
+        u_int32_t addr_hi;      /* address[63:32] */
 
-    /* dword 3 */
-    u_int32_t addr_lo;          /* address[31:2] */
-} __attribute__((packed)) pcie_tlp_mem64_t;
+        /* dword 3 */
+        u_int32_t addr_lo;      /* address[31:2] */
+    } __attribute__((packed));
+    u_int32_t dw[4];
+} pcie_tlp_mem64_t;
 
 #ifdef __cplusplus
 }

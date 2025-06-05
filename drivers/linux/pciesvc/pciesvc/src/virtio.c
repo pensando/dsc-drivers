@@ -4,25 +4,26 @@
  */
 
 #include "pciesvc_impl.h"
+#include "intrutils.h"
 #include "virtio.h"
 
 #include "virtio_spec.h"
 
-#define FMT64X  "0x%" PRIx64
-#define FMT64U "%" PRIu64
-#define FMT64S "%lu"
-
-#define VIRTIO_DEV_REG_NOTIFY(fld)                                      \
-    case VIRTIO_DEV_REG_OFF(fld):                                       \
-        *do_notify = 1;                                                 \
-        break;
+#define VIRTIO_LOG_FMT "addr 0x%"PRIx64" off %"PRIu64" size %lu val 0x%"PRIx64
 
 #define VIRTIO_DEV_REG_RD(fld)                                          \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
         pciesvc_mem_rd(addr, &val, VIRTIO_DEV_REG_SZ(fld));             \
-        pciesvc_logdebug("%s: read %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"", \
+        pciesvc_logdebug("%s: read %s "VIRTIO_LOG_FMT"",                \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         break;
+
+#define VIRTIO_DEV_REG_RD_PROC(fld, proc)                               \
+        case VIRTIO_DEV_REG_OFF(fld):                                   \
+            proc(phwdev, addr - baroff, size, &val);                    \
+            pciesvc_logdebug("%s: read %s "VIRTIO_LOG_FMT" proc %s",   \
+                pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, #proc);  \
+            break;
 
 #define VIRTIO_DEV_REG_RD_ARR(fld, arr_fld, idx_fld, idx_count)         \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
@@ -31,44 +32,35 @@
         if (idx < idx_count) {                                          \
             pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
                            &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
-            pciesvc_logdebug("%s: read %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+            pciesvc_logdebug("%s: read %s[%"PRIu64"] "VIRTIO_LOG_FMT"", \
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
         } else {                                                        \
-            pciesvc_logerror("%s: read %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" (out of bounds)",\
+            pciesvc_logdebug("%s: read %s[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
         }                                                               \
         break;
 
-#define VIRTIO_DEV_REG_WR(fld)                               \
+#define VIRTIO_DEV_REG_WR(fld)                                          \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+        pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT"",               \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(fld));             \
         break;
 
-#define VIRTIO_DEV_REG_WR_COND(fld, cond)                               \
-        case VIRTIO_DEV_REG_OFF(fld):                                              \
-            pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" cond %u", \
-                pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, cond);  \
-            if (cond) {                                                            \
-                pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(fld));                \
-            }                                                                      \
-            break;
-
 #define VIRTIO_DEV_REG_WR_PROC(fld, proc)                               \
-        case VIRTIO_DEV_REG_OFF(fld):                                              \
-            pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" proc %s", \
+        case VIRTIO_DEV_REG_OFF(fld):                                   \
+            pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT" proc %s",   \
                 pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val, #proc);  \
-            proc(phwdev, addr, baroff, size, val);                                 \
+            proc(phwdev, addr - baroff, size, val, dev_type);           \
             break;
 
-#define VIRTIO_DEV_REG_WR_IGN(fld)                           \
+#define VIRTIO_DEV_REG_WR_IGN(fld)                                      \
     case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_logdebug("%s: write %s addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore",\
+        pciesvc_logdebug("%s: write %s "VIRTIO_LOG_FMT" ignore",        \
             pciehwdev_get_name(phwdev), #fld, addr, baroff, size, val); \
         break;
 
@@ -77,33 +69,14 @@
         pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, idx_fld),              \
                        &idx, VIRTIO_DEV_REG_SZ(idx_fld));               \
         if (idx < idx_count) {                                          \
-            pciesvc_logdebug("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X"",\
+            pciesvc_logdebug("%s: write %s[%"PRIu64"] "VIRTIO_LOG_FMT"",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
             pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
                            &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
         } else {                                                        \
-            pciesvc_logerror("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" (out of bounds)",\
-                             pciehwdev_get_name(phwdev), #fld, idx,     \
-                             VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
-                             baroff, size, val);                        \
-        }                                                               \
-        break;
-
-#define VIRTIO_DEV_REG_WR_ARR_IGN(fld, arr_fld, idx_fld, idx_count)     \
-    case VIRTIO_DEV_REG_OFF(fld):                                       \
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, idx_fld),              \
-                       &idx, VIRTIO_DEV_REG_SZ(idx_fld));               \
-        if (idx < idx_count) {                                          \
-            pciesvc_logdebug("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore",\
-                             pciehwdev_get_name(phwdev), #fld, idx,     \
-                             VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
-                             baroff, size, val);                        \
-            pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, arr_fld),          \
-                           &val, VIRTIO_DEV_REG_SZ(arr_fld));           \
-        } else {                                                        \
-            pciesvc_logerror("%s: write %s["FMT64U"] addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" ignore (out of bounds)",\
+            pciesvc_logdebug("%s: write %s[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",\
                              pciehwdev_get_name(phwdev), #fld, idx,     \
                              VIRTIO_DEV_REG_ADDR(base, arr_fld),        \
                              baroff, size, val);                        \
@@ -114,20 +87,43 @@
         (_offs >= VIRTIO_DEV_REG_OFF(_fld) &&                           \
          (_offs + _sz) <= VIRTIO_DEV_REG_OFF(_fld) + VIRTIO_DEV_REG_SZ(_fld))
 
+
+static void
+virtio_barrd_isr_status(pciehwdev_t *phwdev, const u_int64_t base,
+                        const size_t size, u_int64_t *val)
+{
+    u_int8_t cfg_status;
+    u_int32_t credits;
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, isr_cfg.cfg_status),
+                   &cfg_status, sizeof(cfg_status));
+
+    // Clear-on-read
+    credits = intr_pba_clear(pciehwdev_get_intrb(phwdev));
+
+    *val = (credits ? VIRTIO_ISR_STATUS_VQ_BIT : 0) | cfg_status;
+
+    if (cfg_status) {
+        // Clear-on-read
+        cfg_status = 0;
+        pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, isr_cfg.cfg_status),
+                       &cfg_status, sizeof(cfg_status));
+    }
+}
+
 u_int64_t
 virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
              const u_int64_t baroff, const size_t size,
-             u_int8_t *do_notify)
+             u_int8_t *do_notify, u_int64_t *opaque)
 {
     u_int64_t base = addr - baroff;
     u_int64_t val = 0;
     u_int64_t idx = 0;
 
-    /* net_cfg */
-    if (VIRTIO_DEV_REG_INSIDE(part1, baroff, size)) {
+    /* dev_cfg -> net_cfg, blk_cfg  */
+    if (VIRTIO_DEV_REG_INSIDE(dev_cfg, baroff, size)) {
         pciesvc_mem_rd(addr, &val, size);
-        pciesvc_logdebug("%s: read part1 addr "FMT64X" "
-                         "off "FMT64U" size "FMT64S" val "FMT64X"",
+        pciesvc_logdebug("%s: read dev_cfg "VIRTIO_LOG_FMT"",
                          pciehwdev_get_name(phwdev), addr, baroff, size, val);
         return val;
     }
@@ -203,25 +199,91 @@ virtio_barrd(pciehwdev_t *phwdev, u_int64_t addr,
                           cmn_cfg.queue_select,
                           VIRTIO_PCI_QUEUE_SELECT_COUNT);
 
+    VIRTIO_DEV_REG_RD_ARR(cmn_cfg.queue_cfg.queue_reset,
+                          queue_cfg[idx].queue_reset,
+                          cmn_cfg.queue_select,
+                          VIRTIO_PCI_QUEUE_SELECT_COUNT);
+
+    VIRTIO_DEV_REG_RD_PROC(isr_cfg,
+                           virtio_barrd_isr_status);
+
     default:
         val = 0;
-        pciesvc_logerror("%s: read addr "FMT64X" off "FMT64U" size "FMT64S" default ignore",
-            pciehwdev_get_name(phwdev), addr, baroff, size);
+        pciesvc_logdebug("%s: read "VIRTIO_LOG_FMT" default ignore",
+                         pciehwdev_get_name(phwdev), addr, baroff, size, val);
         break;
     }
 
     return val;
 }
 
+// Nicmgr initialized the queue configs with notify offsets in the incr_pi_dbell range.
+// Here we modify the offsets depending on which features are selected, to change the
+// doorbell behavior.
+//
+// Notification Data wants to use SET_PI instead of INC_PI.  Split VQ wants to use
+// SCHED_SET instead of SCHED_NONE for RX. Net alternates even/odd, block does not.
+//
+// This is done here in pciesvc, so that the driver can read the notify offset of queues
+// _immediately_ after setting features ok.
 static void
-virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
-                           const u_int64_t baroff, const size_t size,
-                           const u_int64_t val)
+virtio_barwr_config_notif_data(pciehwdev_t *phwdev,
+                               const u_int64_t base,
+                               const u_int64_t features,
+                               const u_int8_t dev_type)
 {
-    u_int64_t base = addr - baroff;
+    uint16_t notify_offset;
+    u_int16_t vq_i, vq_count;
+
+    switch (dev_type) {
+    case VIRTIO_DEV_TYPE_NET:
+        notify_offset = virtio_notify_offset_net(features);
+        break;
+    case VIRTIO_DEV_TYPE_BLK:
+        notify_offset = virtio_notify_offset_blk(features);
+        break;
+    default:
+        notify_offset = 0;
+        break;
+    }
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.num_queues),
+                   &vq_count, sizeof(vq_count));
+
+    pciesvc_logdebug("proc: dev_type %u vq_count %u notify_offset %u",
+                     dev_type, vq_count, notify_offset);
+
+    for (vq_i = 0; vq_i < vq_count; ++vq_i) {
+        u_int64_t off_addr =
+            VIRTIO_DEV_REG_ADDR(base, queue_cfg[vq_i].queue_notify_off);
+
+        u_int16_t off;
+
+        switch (dev_type) {
+        case VIRTIO_DEV_TYPE_NET:
+            off = notify_offset + VIRTIO_VQID_NOTIFY_OFF_NET(vq_i);
+            break;
+        case VIRTIO_DEV_TYPE_BLK:
+            off = notify_offset + VIRTIO_VQID_NOTIFY_OFF_BLK(vq_i);
+            break;
+        default:
+            off = notify_offset;
+            break;
+        }
+
+        pciesvc_mem_wr(off_addr, &off, sizeof(off));
+    }
+}
+
+static void
+virtio_barwr_device_status(pciehwdev_t *phwdev, const u_int64_t base,
+                           const size_t size, const u_int64_t val,
+                           const u_int8_t dev_type)
+{
     u_int8_t old = 0;
 
-    pciesvc_mem_rd(addr, &old, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status),
+                   &old, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
 
     if (!val) {
         // If pciemgr sees the transition nonzero -> zero, then nicmgr needs to
@@ -256,80 +318,120 @@ virtio_barwr_device_status(pciehwdev_t *phwdev, u_int64_t addr,
     }
 
     if ((val & VIRTIO_S_FEATURES_OK) && !(old & VIRTIO_S_FEATURES_OK)) {
-        u_int32_t feature_lo = 0;
-        u_int32_t feature_hi = 0;
-        u_int64_t feature = 0;
+        u_int64_t features = 0;
+        u_int64_t hw_features = 0;
+        u_int64_t unsupp_features;
 
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[0]),
-                       &feature_lo, sizeof(feature_lo));
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.active_features),
+                       &features, sizeof(features));
 
-        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[1]),
-                       &feature_hi, sizeof(feature_hi));
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, ident.hw_features),
+                       &hw_features, sizeof(hw_features));
 
-        feature = (u_int64_t)feature_lo | ((u_int64_t)feature_hi << 32);
-
-        pciesvc_loginfo("proc: features_ok "FMT64X"", feature);
-
-        if (feature & VIRTIO_F_NOTIFICATION_DATA) {
-            // Nicmgr initialized the queue configs with notify offsets in
-            // the incr_pi_dbell range.  If this feature is selected,
-            // modify the queue configs to ring the same doorbell via the
-            // set_pi_dbell range.
-            //
-            // This is done here in pciesvc, so that the driver can read
-            // the notify offset of queues _immediately_ after setting
-            // features ok.
-
-            const uint16_t notify_offset =
-                offsetof(struct virtio_pci_notify_reg, set_pi_dbell)
-                / VIRTIO_NOTIFY_MULTIPLIER;
-
-            u_int16_t vq_i = 0, vq_count = 0;
-
-            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.num_queues),
-                           &vq_count, sizeof(vq_count));
-
-            pciesvc_logdebug("proc: vq_count %u notify_offset %u",
-                             vq_count, notify_offset);
-
-            for (; vq_i < vq_count; ++vq_i) {
-                u_int64_t off_addr =
-                    VIRTIO_DEV_REG_ADDR(base, queue_cfg[vq_i].queue_notify_off);
-
-                u_int16_t off = 0;
-
-                pciesvc_mem_rd(off_addr, &off, sizeof(off));
-                off += notify_offset;
-                pciesvc_mem_wr(off_addr, &off, sizeof(off));
-            }
+        unsupp_features = features & ~hw_features;
+        if (unsupp_features) {
+            pciesvc_logdebug("proc: request for unsupported features %"PRIx64,
+                             unsupp_features);
+            // Don't update the status. Driver will see that the
+            // FEATURES_OK bit was not acknowledged by the device.
+            return;
         }
+
+        pciesvc_loginfo("proc: features_ok 0x%"PRIx64"", features);
+
+        // Now react to any feature bit changes, as needed
+
+        virtio_barwr_config_notif_data(phwdev, base, features, dev_type);
     }
 
-    pciesvc_mem_wr(addr, &val, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+    pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status), &val,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+}
+
+static void
+virtio_barwr_driver_feature(pciehwdev_t *phwdev, const u_int64_t base,
+                            const size_t size, const u_int64_t val,
+                            const u_int8_t dev_type)
+{
+    u_int64_t reg_addr, reg_size;
+    u_int64_t idx = 0;
+    u_int8_t status = 0;
+
+    // Verify that device is in the correct state
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status), &status,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+
+    if (status & VIRTIO_S_FEATURES_OK) {
+        pciesvc_logdebug("proc: ignoring late features write");
+        return;
+    }
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_select),
+                   &idx,
+                   VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_select));
+
+    reg_addr = VIRTIO_DEV_REG_ADDR(base, cmn_cfg.driver_feature_cfg[idx]);
+    reg_size = VIRTIO_DEV_REG_SZ(cmn_cfg.driver_feature_cfg[idx]);
+
+    if (idx < VIRTIO_PCI_FEATURE_SELECT_COUNT) {
+        pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT"",
+                         pciehwdev_get_name(phwdev), idx, reg_addr,
+                         reg_addr - base, size, val);
+        // Actually perform the requested write
+        pciesvc_mem_wr(reg_addr, &val, reg_size);
+
+        // If the driver negotiates F_MRG_RXBUF, switch to the larger mtu,
+        // this is required /before/ the driver sends features ok.
+        if (idx == 0 &&
+            dev_type == VIRTIO_DEV_TYPE_NET &&
+            (val & VIRTIO_NET_F_MRG_RXBUF)) {
+            u_int16_t mtu = 0;
+            pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.mtu_mrg_rxbuf),
+                           &mtu, sizeof(mtu));
+            pciesvc_mem_wr(VIRTIO_DEV_REG_ADDR(base, net_cfg.mtu),
+                           &mtu, sizeof(mtu));
+        }
+    } else {
+        pciesvc_logdebug("%s: write cmn_cfg.driver_feature[%"PRIu64"] "VIRTIO_LOG_FMT" (out of bounds)",
+                         pciehwdev_get_name(phwdev), idx, reg_addr,
+                         reg_addr - base, size, val);
+    }
 }
 
 void
 virtio_barwr(pciehwdev_t *phwdev, u_int64_t addr,
              const u_int64_t baroff, const size_t size, const u_int64_t val,
-             u_int8_t *do_notify)
+             u_int8_t *do_notify, u_int64_t *opaque)
 {
     u_int64_t base = addr - baroff;
     u_int64_t idx = 0;
+    u_int16_t queue_select = 0;
+    u_int8_t dev_type = 0;
+    u_int8_t dev_status = 0;
+
+    pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_type),
+                   &dev_type, sizeof(dev_type));
+
+    /* blk_cfg */
+    if (dev_type == VIRTIO_DEV_TYPE_BLK &&
+        VIRTIO_DEV_REG_INSIDE(blk_cfg, baroff, size)) {
+        switch (baroff) {
+        case VIRTIO_DEV_REG_OFF(blk_cfg.writeback):
+            *do_notify = 1;
+            break;
+        }
+        return;
+    }
 
     switch (baroff) {
     VIRTIO_DEV_REG_WR(cmn_cfg.device_feature_select);
 
-    VIRTIO_DEV_REG_WR_ARR_IGN(cmn_cfg.device_feature,
-                              cmn_cfg.device_feature_cfg[idx],
-                              cmn_cfg.device_feature_select,
-                              VIRTIO_PCI_FEATURE_SELECT_COUNT);
+    VIRTIO_DEV_REG_WR_IGN(cmn_cfg.device_feature);
 
     VIRTIO_DEV_REG_WR(cmn_cfg.driver_feature_select);
 
-    VIRTIO_DEV_REG_WR_ARR(cmn_cfg.driver_feature,
-                          cmn_cfg.driver_feature_cfg[idx],
-                          cmn_cfg.driver_feature_select,
-                          VIRTIO_PCI_FEATURE_SELECT_COUNT);
+    VIRTIO_DEV_REG_WR_PROC(cmn_cfg.driver_feature,
+                           virtio_barwr_driver_feature);
 
     VIRTIO_DEV_REG_WR(cmn_cfg.config_msix_vector);
     VIRTIO_DEV_REG_WR_IGN(cmn_cfg.num_queues);
@@ -387,15 +489,46 @@ virtio_barwr(pciehwdev_t *phwdev, u_int64_t addr,
                           cmn_cfg.queue_select,
                           VIRTIO_PCI_QUEUE_SELECT_COUNT);
 
+    VIRTIO_DEV_REG_WR_ARR(cmn_cfg.queue_cfg.queue_reset,
+                          queue_cfg[idx].queue_reset,
+                          cmn_cfg.queue_select,
+                          VIRTIO_PCI_QUEUE_SELECT_COUNT);
+
+    VIRTIO_DEV_REG_WR_IGN(isr_cfg);
+
     default:
-        pciesvc_logerror("%s: write addr "FMT64X" off "FMT64U" size "FMT64S" val "FMT64X" default ignore",
+        pciesvc_logdebug("%s: write "VIRTIO_LOG_FMT" default ignore",
             pciehwdev_get_name(phwdev), addr, baroff, size, val);
         break;
     }
 
     switch (baroff) {
-    VIRTIO_DEV_REG_NOTIFY(cmn_cfg.device_status);
-    VIRTIO_DEV_REG_NOTIFY(cmn_cfg.queue_select);
-    VIRTIO_DEV_REG_NOTIFY(cmn_cfg.queue_cfg.queue_enable);
+    case VIRTIO_DEV_REG_OFF(cmn_cfg.device_status):
+        *do_notify = 1;
+        break;
+    case VIRTIO_DEV_REG_OFF(cmn_cfg.queue_cfg.queue_enable):
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.device_status),
+                       &dev_status, VIRTIO_DEV_REG_SZ(cmn_cfg.device_status));
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.queue_select),
+                       &queue_select, sizeof(queue_select));
+
+        // Only post notifications for queue_enable after DRIVER_OK.
+        // If the device sets up its queues before DRIVER_OK, it may attempt
+        // to start reading memory from the host before a QEMU guest has set
+        // up DMA mappings. This leads to DMA errors and CVQ failures. To
+        // avoid this, nicmgr defers queue setup until after DRIVER_OK.
+        // Since setup would be deferred anyway, save the time & noise of
+        // the notification.
+        if (dev_status & VIRTIO_S_DRIVER_OK) {
+            *do_notify = 1;
+            *opaque = queue_select;
+        }
+        break;
+    case VIRTIO_DEV_REG_OFF(cmn_cfg.queue_cfg.queue_reset):
+        pciesvc_mem_rd(VIRTIO_DEV_REG_ADDR(base, cmn_cfg.queue_select),
+                       &queue_select, sizeof(queue_select));
+        *do_notify = 1;
+        *opaque = queue_select;
+        break;
     }
 }

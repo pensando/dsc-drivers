@@ -15,6 +15,30 @@
 #include "vpd.h"
 #include "reset.h"
 
+void pciesvc_cfgspace_get(const pciehwdevh_t hwdevh, cfgspace_t *cs);
+void pciesvc_cfgspace_put(const pciehwdevh_t hwdevh, const cfgspace_t *cs, const int dirty);
+void pciehw_cfg_load(pciehwdev_t *phwdev);
+void pciehw_cfg_unload(pciehwdev_t *phwdev);
+void pciehw_sriov_ctrl(pciehwdev_t *phwdev, const u_int16_t ctrl, const u_int16_t numvfs);
+
+#ifdef AW_SW_MODE /* PS-12516: belongs in a header */
+/* This copy-paste is rather horrid, but until we have a way to introduce a proper header we can't do better than this. */
+typedef enum {
+    SERDES_REG_DOMAIN_CNM,
+    SERDES_REG_DOMAIN_TX,
+    SERDES_REG_DOMAIN_RX,
+    SERDES_REG_DOMAIN_PCS,
+} pcieawd_reg_domain_t;
+
+#if defined(RTOS) && defined(CONFIG_PCIEAWD)
+int pcieawd_read_serdes_reg(int port, pcieawd_reg_domain_t domain, uint8_t lane, uint32_t offset, uint32_t *data);
+int pcieawd_write_serdes_reg(int port, pcieawd_reg_domain_t domain, uint8_t lane, uint32_t offset, uint32_t data);
+#else
+int pcieawd_read_serdes_reg(int port, pcieawd_reg_domain_t domain, uint8_t lane, uint32_t offset, uint32_t *data) {return 0;}
+int pcieawd_write_serdes_reg(int port, pcieawd_reg_domain_t domain, uint8_t lane, uint32_t offset, uint32_t data) {return 0;}
+#endif
+#endif
+
 typedef struct handler_ctx_s {
     pcie_stlp_t stlp;
     int port;
@@ -23,6 +47,96 @@ typedef struct handler_ctx_s {
     indirect_entry_t *ientry;
     notify_entry_t *nentry;
 } handler_ctx_t;
+
+typedef enum pcie_regs_dvsec_domain_e {
+    PCIE_REGS_DVSEC_DOMAIN_NONE = 0,
+    PCIE_REGS_DVSEC_DOMAIN_CNM,
+    PCIE_REGS_DVSEC_DOMAIN_TX,
+    PCIE_REGS_DVSEC_DOMAIN_RX,
+    PCIE_REGS_DVSEC_DOMAIN_PCS,
+} pcie_regs_dvsec_domain_t;
+
+typedef enum pcie_regs_dvsec_status_e {
+    PCIE_REGS_DVSEC_STATUS_SUCCESS = 0,
+    PCIE_REGS_DVSEC_STATUS_ERANGE,
+    PCIE_REGS_DVSEC_STATUS_EINVAL,
+} pcie_regs_dvsec_status_t;
+
+#ifdef SIM
+typedef struct cfgspace_sim_ctx {
+    int valid;
+    pciehwdevh_t hwdevh;
+    u_int8_t cfg_cur[PCIEHW_CFGSZ];
+    u_int8_t cfg_sav[PCIEHW_CFGSZ];
+} cfgspace_sim_ctx_t;
+
+static cfgspace_sim_ctx_t cfgspace_sim_ctx;
+
+void
+pciesvc_cfgspace_get(const pciehwdevh_t hwdevh, cfgspace_t *cs)
+{
+    pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+    cfgspace_sim_ctx_t *cfgctx = &cfgspace_sim_ctx;
+    uint64_t cfgcurpa;
+
+    pciesvc_assert(!cfgctx->valid);
+    cfgctx->valid = 1;
+    cfgctx->hwdevh = hwdevh;
+    cfgcurpa = pal_mem_vtop(PHWMEM_DATA_FIELD(phwmem, pshmem, cfgcur[hwdevh]));
+    pal_mem_rd(cfgcurpa, cfgctx->cfg_cur, PCIEHW_CFGSZ, 0);
+    pciesvc_memcpy(cfgctx->cfg_sav, cfgctx->cfg_cur, PCIEHW_CFGSZ);
+    cs->cur = cfgctx->cfg_cur;
+    cs->msk = PSHMEM_DATA_FIELD(pshmem, cfgmsk[hwdevh]);
+    cs->rst = PSHMEM_DATA_FIELD(pshmem, cfgrst[hwdevh]);
+    cs->size = PCIEHW_CFGSZ;
+}
+
+void
+pciesvc_cfgspace_put(const pciehwdevh_t hwdevh,
+                     const cfgspace_t *cs,
+                     const int dirty)
+{
+    pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+    cfgspace_sim_ctx_t *cfgctx = &cfgspace_sim_ctx;
+
+    pciesvc_assert(cfgctx->valid);
+    pciesvc_assert(cfgctx->hwdevh == hwdevh);
+    if (dirty) {
+        uint64_t cfgcurpa =
+            pal_mem_vtop(PHWMEM_DATA_FIELD(phwmem, pshmem, cfgcur[hwdevh]));
+        pal_mem_wr(cfgcurpa, cs->cur, PCIEHW_CFGSZ, 0);
+    } else {
+        /* !dirty so verify cur still matches cfg_sav */
+        pciesvc_assert(pciesvc_memcmp(cs->cur, cfgctx->cfg_sav,
+                                      PCIEHW_CFGSZ) == 0);
+    }
+    cfgctx->valid = 0;
+}
+
+#else
+
+void
+pciesvc_cfgspace_get(const pciehwdevh_t hwdevh, cfgspace_t *cs)
+{
+    pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+
+    cs->cur = PHWMEM_DATA_FIELD(phwmem, pshmem, cfgcur[hwdevh]);
+    cs->msk = PSHMEM_DATA_FIELD(pshmem, cfgmsk[hwdevh]);
+    cs->rst = PSHMEM_DATA_FIELD(pshmem, cfgrst[hwdevh]);
+    cs->size = PCIEHW_CFGSZ;
+}
+
+void
+pciesvc_cfgspace_put(const pciehwdevh_t hwdevh,
+                     const cfgspace_t *cs,
+                     const int dirty)
+{
+    /* nop */
+}
+#endif
 
 /*
  * Detect these overlaps:
@@ -83,7 +197,8 @@ stlp_overlap(const pcie_stlp_t *stlp,
 static pciehwdevh_t
 cfgpa_to_hwdevh(const u_int64_t cfgpa)
 {
-#define CFGCURSZ sizeof(((pciehw_mem_t *)0L)->cfgcur)
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+#define CFGCURSZ PHWMEM_SIZEOF(phwmem, pshmem, cfgcur)
     const u_int64_t cfgcurpa = pciesvc_cfgcur_pa();
 
     if (cfgpa >= cfgcurpa && cfgpa < cfgcurpa + CFGCURSZ) {
@@ -113,6 +228,122 @@ static void
 pciehw_cfgrd_delay(handler_ctx_t *hctx)
 {
     pciesvc_debug_cmd(&hctx->retval);
+}
+
+#ifdef AW_SW_MODE
+static int
+pciehw_cfgrd_dvsec_serdes_regs(int port, pcie_regs_dvsec_domain_t domain, u_int8_t lane, u_int32_t off,
+                               u_int32_t *data)
+{
+    pcieawd_reg_domain_t pcieawd_domain;
+    switch (domain) {
+    case PCIE_REGS_DVSEC_DOMAIN_CNM:
+        pcieawd_domain = SERDES_REG_DOMAIN_CNM;
+        break;
+    case PCIE_REGS_DVSEC_DOMAIN_TX:
+        pcieawd_domain = SERDES_REG_DOMAIN_TX;
+        break;
+    case PCIE_REGS_DVSEC_DOMAIN_RX:
+        pcieawd_domain = SERDES_REG_DOMAIN_RX;
+        break;
+    case PCIE_REGS_DVSEC_DOMAIN_PCS:
+        pcieawd_domain = SERDES_REG_DOMAIN_PCS;
+        break;
+    default:
+        return 22 /*EINVAL*/;
+    }
+
+    return pcieawd_read_serdes_reg(port, pcieawd_domain, lane, off, data);
+}
+#else
+static int
+pciehw_cfgrd_dvsec_serdes_regs(int port, pcie_regs_dvsec_domain_t domain, u_int8_t lane, u_int32_t off,
+                               u_int32_t *data)
+{
+   return 22 /*EINVAL*/;
+}
+#endif
+
+static void
+pciehw_cfgrd_dvsec_internal_regs(handler_ctx_t *hctx)
+{
+    pciehwdev_t *phwdev;
+    cfgspace_t cs;
+    u_int8_t lane_reg, auto_increment;
+    u_int16_t dvseccap, ctrl_reg;
+    u_int32_t off_reg, data_lo32, data_hi32;
+    int rc;
+    pcie_regs_dvsec_domain_t domain;
+    pcie_regs_dvsec_status_t status;
+
+    phwdev = pciehwdev_get(hctx->hwdevh);
+    pciesvc_cfgspace_get(hctx->hwdevh, &cs);
+    dvseccap = hctx->stlp.addr - 0x14;
+
+    ctrl_reg = cfgspace_readw(&cs, dvseccap + 0xA);
+    lane_reg = cfgspace_readb(&cs, dvseccap + 0xE);
+    off_reg = cfgspace_readd(&cs, dvseccap + 0x10);
+
+    auto_increment = ctrl_reg >> 15;
+    domain = ctrl_reg & 0xff;
+
+    switch (domain) {
+    case PCIE_REGS_DVSEC_DOMAIN_NONE:
+        /* nothing to do, blindly report success */
+        cfgspace_setw(&cs, dvseccap + 0xC, PCIE_REGS_DVSEC_STATUS_SUCCESS);
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    case PCIE_REGS_DVSEC_DOMAIN_CNM:
+    case PCIE_REGS_DVSEC_DOMAIN_TX:
+    case PCIE_REGS_DVSEC_DOMAIN_RX:
+    case PCIE_REGS_DVSEC_DOMAIN_PCS:
+        /* TODO: validate the lane in cfgspace w.r.t. link lane organisation. pcieawd isn't aware of this mapping */
+        rc = pciehw_cfgrd_dvsec_serdes_regs(hctx->port, domain, lane_reg, off_reg, &data_lo32);
+        data_hi32 = 0; /* high 32 bits aren't used by serdes */
+        break;
+    default:
+        cfgspace_setw(&cs, dvseccap + 0xC, PCIE_REGS_DVSEC_STATUS_EINVAL);
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    }
+
+    switch (rc) {
+    case 0:
+        status = PCIE_REGS_DVSEC_STATUS_SUCCESS;
+        break;
+    case 22 /*EINVAL*/:
+        status = PCIE_REGS_DVSEC_STATUS_EINVAL;
+        break;
+    case 34 /*ERANGE*/:
+        status = PCIE_REGS_DVSEC_STATUS_ERANGE;
+        break;
+    default:
+        pciesvc_logerror("Unexpected errno (%d) from serdes reg read\n", rc);
+        status = PCIE_REGS_DVSEC_STATUS_EINVAL;
+        break;
+    }
+
+    cfgspace_setw(&cs, dvseccap + 0xC, status);
+
+    if (status != PCIE_REGS_DVSEC_STATUS_SUCCESS) {
+        /* Nothing else to do if we failed */
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    }
+
+    cfgspace_writed(&cs, dvseccap + 0x14, data_lo32);
+    cfgspace_writed(&cs, dvseccap + 0x18, data_hi32);
+    hctx->retval = data_lo32;
+    if (auto_increment) {
+        off_reg += 4;
+        cfgspace_writew(&cs, dvseccap + 0x10, off_reg);
+    }
+
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+    pciehwdev_put(phwdev, CLEAN);
 }
 
 /*****************************************************************
@@ -204,11 +435,7 @@ pciehw_cfg_busmaster_enable(pciehwdev_t *phwdev, const int on)
                          pciehwdev_get_name(phwdev), on ? "on" : "off");
     }
 #endif
-    if (on) {
-        pciehw_hdrt_load(phwdev->lifb, phwdev->lifc, phwdev->bdf);
-    } else {
-        pciehw_hdrt_unload(phwdev->lifb, phwdev->lifc);
-    }
+    pciehw_hdrt_bus_master(phwdev, on);
 }
 
 static void
@@ -255,7 +482,7 @@ pciehw_cfgwr_cmd(const handler_ctx_t *hctx)
     pciesvc_cfgspace_get(hctx->hwdevh, &cs);
     cmd = cfgspace_readw(&cs, PCI_COMMAND);
     pciehw_cfg_cmd(phwdev, &cs, cmd);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
     pciehwdev_put(phwdev, DIRTY); /* updated bars[].bdf */
 }
 
@@ -275,8 +502,23 @@ pciehw_cfgwr_bars(pciehwdev_t *phwdev,
             if (stlp_overlap(stlp, cfgoff, barlen)) {
                 const u_int64_t vfbaroff = (pciehw_bar_getsize(phwbar) *
                                             phwdev->vfidx);
-                u_int64_t baraddr = cfg_baraddr(cs, cfgoff, barlen);
+                u_int64_t baraddr;
                 u_int64_t addr;
+                if (phwbar->applyaltsize) {
+                    u_int64_t altsizemsk = ~((1ULL << phwbar->altsize) - 1);
+                    uint32_t bardata;
+                    cfgspace_read(cs, stlp->addr, stlp->size, &bardata);
+                    if (stlp->addr == cfgoff) {
+                        /* 32 bit bar or 64 bit lower bar addr */
+                        bardata = (bardata & 0xf) | (stlp->data & altsizemsk);
+                    } else {
+                        /* 64 bit upper bar addr */
+                        bardata = bardata | (stlp->data & (altsizemsk >> 32));
+                    }
+                    cfgspace_setd(cs, stlp->addr, bardata);
+                }
+
+                baraddr = cfg_baraddr(cs, cfgoff, barlen);
 
                 if (phwbar->type == PCIEHWBARTYPE_IO) {
                     baraddr &= ~0x3ULL;
@@ -305,7 +547,7 @@ pciehw_cfgwr_dev_bars(const handler_ctx_t *hctx)
     phwdev = pciehwdev_get(hctx->hwdevh);
     pciesvc_cfgspace_get(hctx->hwdevh, &cs);
     pciehw_cfgwr_bars(phwdev, &hctx->stlp, &cs, cfgbase);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
     pciehwdev_put(phwdev, DIRTY); /* updated phwdev->bars[] bdf,addr */
 
 }
@@ -325,19 +567,25 @@ pciehw_cfgwr_rom_bar(const handler_ctx_t *hctx)
     phwbar = &phwdev->rombar;
     pciehw_bar_setaddr(phwbar, baraddr);
     pciehw_cfg_rombar_enable(phwdev, &cs);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
     pciehwdev_put(phwdev, DIRTY); /* updated phwdev->bars[] bdf,addr */
 }
 
-static void
-pciehw_mgmtchg_event(const pciehwdev_t *phwdev)
+void
+pciehw_mgmtchg_event(pciehwdev_t *phwdev)
 {
     pciesvc_eventdata_t evd;
+    pciesvc_mgmtchg_t *mgmtchg = &evd.mgmtchg;
+    const uint16_t bdf = pciehwdev_get_hostbdf(phwdev);
+    const uint8_t bus = bdf_to_bus(bdf);
 
+    pciesvc_loginfo("mgmtchg_event: hostbdf 0x%04x bus 0x%02x secbus 0x%02x\n",
+                    bdf, bus, bus - bdf_to_bus(phwdev->bdf));
     pciesvc_memset(&evd, 0, sizeof(evd));
     evd.evtype = PCIESVC_EV_MGMTCHG;
     evd.port = phwdev->port;
     evd.lif = phwdev->lifb;
+    mgmtchg->bus = bus;
     pciesvc_event_handler(&evd, sizeof(evd));
 }
 
@@ -351,6 +599,10 @@ pciehw_cfg_set_bus(pciehwdev_t *phwdev, const u_int8_t bus, const int load)
 {
     u_int8_t busbase, busdelta;
     u_int32_t pmti;
+
+    phwdev->bdf = bdf_make(bus,
+                           bdf_to_dev(phwdev->bdf),
+                           bdf_to_fnc(phwdev->bdf));
 
     busbase = 0;
     for (pmti = phwdev->pmtb; pmti < phwdev->pmtb + phwdev->pmtc; pmti++) {
@@ -447,35 +699,50 @@ pciehw_assign_bus(pciehwdevh_t hwdevh, const u_int8_t bus, const int load)
 }
 
 static void
-pciehw_bridge_secbus(pciehwdev_t *phwdev)
+pciehw_bridge_secbus(pciehwdev_t *phwdev, const int is_reset)
 {
     cfgspace_t cs;
     u_int8_t hwbus, secbus, adjbus;
     pciehwdevh_t childh;
 
-    /*
-     * Note that our bridge PRIMARY_BUS is the same
-     * as hwbus, but pribus is optional in pcie and
-     * some systems (UCS bios) don't set bridge pribus
-     * during the initial bus scan, so we get the
-     * secbus of the hwbridge as a reliable bus.
-     */
-    portcfg_read_bus(phwdev->port, NULL, &hwbus, NULL);
+    if (is_reset) {
+        /*
+         * If this is from a bus reset then we avoid accessing the
+         * hwbridge config space to avoid a potential SError if the
+         * pcie refclk goes away.  We set adjbus=0 so we'll reset
+         * downstream devices in assign_bus() below.
+         * We'll get the "real" bus assigned when the link comes up
+         * and the system assigns buses again.  That event will come
+         * through cfgwr_bridge_bus() and then is_reset=0.
+         */
+        hwbus = 0xff;
+        secbus = 0xff;
+        adjbus = 0;
+    } else {
+        /*
+         * Note that our bridge PRIMARY_BUS is the same
+         * as hwbus, but pribus is optional in pcie and
+         * some systems (UCS bios) don't set bridge pribus
+         * during the initial bus scan, so we get the
+         * secbus of the hwbridge as a reliable bus.
+         */
+        portcfg_read_bus(phwdev->port, NULL, &hwbus, NULL);
 
-    pciesvc_cfgspace_get(phwdev->hwdevh, &cs);
-    secbus = cfgspace_get_secbus(&cs);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+        pciesvc_cfgspace_get(phwdev->hwdevh, &cs);
+        secbus = cfgspace_get_secbus(&cs);
+        pciesvc_cfgspace_put(phwdev->hwdevh, &cs, CLEAN);
 
-    /*
-     * The bridge secbus is a physical bus number.
-     * The hardware usually deals with "adjusted" bus numbers,
-     * i.e. bus numbers relative to the secondary bus of the hw bridge.
-     * Here we perform the bus adjustment the hw will do to our
-     * secondary bus by subtracting the hw bridge secondary bus
-     * from the configured secbus to get the
-     * adjusted bus to assign to our devices.
-     */
-    adjbus = (secbus && hwbus != 0xff) ? secbus - hwbus : 0;
+        /*
+         * The bridge secbus is a physical bus number.
+         * The hardware usually deals with "adjusted" bus numbers,
+         * i.e. bus numbers relative to the secondary bus of the hw bridge.
+         * Here we perform the bus adjustment the hw will do to our
+         * secondary bus by subtracting the hw bridge secondary bus
+         * from the configured secbus to get the
+         * adjusted bus to assign to our devices.
+         */
+        adjbus = (secbus && hwbus != 0xff) ? secbus - hwbus : 0;
+    }
 
     pciesvc_loginfo("%s: hwbus 0x%02x secbus 0x%02x adjbus 0x%02x\n",
                     pciehwdev_get_name(phwdev), hwbus, secbus, adjbus);
@@ -489,8 +756,9 @@ pciehw_cfgwr_bridge_bus(const handler_ctx_t *hctx)
 {
     if (stlp_overlap(&hctx->stlp, PCI_SECONDARY_BUS, sizeof(uint8_t))) {
         pciehwdev_t *phwdev = pciehwdev_get(hctx->hwdevh);
+        const int is_reset = 0;
 
-        pciehw_bridge_secbus(phwdev);
+        pciehw_bridge_secbus(phwdev, is_reset);
 
         pciehwdev_put(phwdev, CLEAN);
     }
@@ -506,7 +774,7 @@ pciehw_cfgwr_bridgectl(const handler_ctx_t *hctx)
     pciesvc_cfgspace_get(hctx->hwdevh, &cs);
     brctl = cfgspace_readw(&cs, PCI_BRIDGE_CONTROL);
     secbus = cfgspace_get_secbus(&cs);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
 
     if (brctl & PCI_BRIDGE_CTL_BUS_RESET) {
         pciehwdev_t *phwdev = pciehwdev_get(hctx->hwdevh);
@@ -531,6 +799,7 @@ pciehw_cfgwr_msix(const handler_ctx_t *hctx)
     msix_mask = (msixctl & PCI_MSIX_FLAGS_MASKALL) != 0;
 
     phwdev = pciehwdev_get(hctx->hwdevh);
+    phwdev->msix_en = msix_en;
 
     if (msix_en) {
         /* msix mode */
@@ -546,7 +815,7 @@ pciehw_cfgwr_msix(const handler_ctx_t *hctx)
         cmd = cfgspace_readw(&cs, PCI_COMMAND);
         fmask = phwdev->vf || (cmd & PCI_COMMAND_INTX_DISABLE) != 0;
     }
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
 
     pciehw_intr_config(phwdev, legacy, fmask);
     pciehwdev_put(phwdev, CLEAN);
@@ -581,7 +850,7 @@ pciehw_cfgwr_vpd(const handler_ctx_t *hctx)
         pciesvc_mem_barrier();  /* data lands *before* we set ADDR_F */
         cfgspace_writew(&cs, vpdcap + PCI_VPD_ADDR, addr | PCI_VPD_ADDR_F);
     }
-    pciesvc_cfgspace_put(&cs, DIRTY); /* VPD_DATA,VPD_ADDR */
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY); /* VPD_DATA,VPD_ADDR */
 }
 
 static void
@@ -589,16 +858,31 @@ pciehw_cfgwr_pcie_devctl(const handler_ctx_t *hctx)
 {
     cfgspace_t cs;
     u_int16_t pciecap, devctl;
+    pciehwdev_t *phwdev, *vfhwdev;
+    int ro_en, vfidx;
 
     pciesvc_cfgspace_get(hctx->hwdevh, &cs);
     pciecap = cfgspace_findcap(&cs, PCI_CAP_ID_EXP);
     devctl = cfgspace_readw(&cs, pciecap + PCI_EXP_DEVCTL);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
 
     if (stlp_overlap(&hctx->stlp, pciecap + 0x8, sizeof(u_int16_t))) {
         if (devctl & PCI_EXP_DEVCTL_BCR_FLR) {
-            pciehwdev_t *phwdev = pciehwdev_get(hctx->hwdevh);
+            phwdev = pciehwdev_get(hctx->hwdevh);
             pciehw_reset_flr(phwdev);
+            pciehwdev_put(phwdev, CLEAN);
+        }
+
+        ro_en = (devctl & PCI_EXP_DEVCTL_RELAX_EN) ? 1 : 0;
+        phwdev = pciehwdev_get(hctx->hwdevh);
+        if (pciehw_hdrt_set_relaxed_order(phwdev, ro_en)) {
+            for (vfidx = 0; vfidx < phwdev->enabledvfs; vfidx++) {
+                vfhwdev = pciehwdev_vfdev_get(phwdev, vfidx);
+                pciehw_hdrt_set_relaxed_order(vfhwdev, ro_en);
+                pciehwdev_vfdev_put(vfhwdev, DIRTY);
+            }
+            pciehwdev_put(phwdev, DIRTY);
+        } else {
             pciehwdev_put(phwdev, CLEAN);
         }
     }
@@ -635,7 +919,7 @@ pciehw_sriov_adjust_vf0(pciehwdev_t *vfhwdev, const int numvfs)
         pciehw_spmt_t *spmt, *spmte;
         if (!phwbar->valid) continue;
         do_log = 1; /* log adjust_vf0 for first pmt of bar */
-        spmt = &pshmem->spmt[phwbar->pmtb];
+        spmt = PSHMEM_ADDR_FIELD(pshmem, spmt[phwbar->pmtb]);
         spmte = spmt + phwbar->pmtc;
         for ( ; spmt < spmte; spmt++) {
             if (spmt->vf0) {
@@ -768,7 +1052,7 @@ pciehw_sriov_ctrl(pciehwdev_t *phwdev,
                   const u_int16_t ctrl, const u_int16_t numvfs)
 {
     if (phwdev->sriovctrl != ctrl) {
-#ifdef __aarch64__
+#ifdef HW
         pciesvc_loginfo("%s "
                         "sriov_ctrl 0x%04x vfe%c mse%c ari%c numvfs %d\n",
                         pciehwdev_get_name(phwdev),
@@ -798,7 +1082,7 @@ pciehw_cfgwr_sriov_ctrl(const handler_ctx_t *hctx)
     numvfs = cfgspace_readw(&cs, sriovcap + PCI_SRIOV_NUM_VF);
     if (numvfs > phwdev->totalvfs) numvfs = phwdev->totalvfs;
 
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, CLEAN);
 
     /*
      * If we're running as an indirect transaction then we'll have ientry
@@ -834,7 +1118,122 @@ pciehw_cfgwr_sriov_bars(const handler_ctx_t *hctx)
         pciehw_cfgwr_bars(vfhwdev, &hctx->stlp, &pfcs, sriovcap + 0x24);
         pciehwdev_vfdev_put(vfhwdev, DIRTY); /* vfhwdev->bars[] bdf,addr */
     }
-    pciesvc_cfgspace_put(&pfcs, CLEAN);
+    pciesvc_cfgspace_put(hctx->hwdevh, &pfcs, CLEAN);
+    pciehwdev_put(phwdev, CLEAN);
+}
+
+#ifdef AW_SW_MODE
+static int
+pciehw_cfgwr_dvsec_serdes_regs(int port, pcie_regs_dvsec_domain_t domain, u_int8_t lane, u_int32_t off,
+                               u_int32_t data)
+{
+    pcieawd_reg_domain_t pcieawd_domain;
+    switch (domain) {
+        case PCIE_REGS_DVSEC_DOMAIN_CNM:
+            pcieawd_domain = SERDES_REG_DOMAIN_CNM;
+            break;
+        case PCIE_REGS_DVSEC_DOMAIN_TX:
+            pcieawd_domain = SERDES_REG_DOMAIN_TX;
+            break;
+        case PCIE_REGS_DVSEC_DOMAIN_RX:
+            pcieawd_domain = SERDES_REG_DOMAIN_RX;
+            break;
+        case PCIE_REGS_DVSEC_DOMAIN_PCS:
+            pcieawd_domain = SERDES_REG_DOMAIN_PCS;
+            break;
+        default:
+            return 22 /*EINVAL*/;
+    }
+
+    return pcieawd_write_serdes_reg(port, pcieawd_domain, lane, off, data);
+}
+#else
+static int
+pciehw_cfgwr_dvsec_serdes_regs(int port, pcie_regs_dvsec_domain_t domain, u_int8_t lane, u_int32_t off,
+                               u_int32_t data)
+{
+   return 22 /*EINVAL*/;
+}
+#endif
+
+static void
+pciehw_cfgwr_dvsec_internal_regs(const handler_ctx_t *hctx)
+{
+    pciehwdev_t *phwdev;
+    cfgspace_t cs;
+    u_int8_t lane_reg, auto_increment;
+    u_int16_t dvseccap, ctrl_reg;
+    u_int32_t off_reg, data_reg_lo32, data_reg_hi32;
+    int rc;
+    pcie_regs_dvsec_domain_t domain;
+    pcie_regs_dvsec_status_t status;
+
+    phwdev = pciehwdev_get(hctx->hwdevh);
+    pciesvc_cfgspace_get(hctx->hwdevh, &cs);
+    dvseccap = hctx->stlp.addr - 0x14;
+
+    ctrl_reg = cfgspace_readw(&cs, dvseccap + 0xA);
+    lane_reg = cfgspace_readb(&cs, dvseccap + 0xE);
+    off_reg = cfgspace_readd(&cs, dvseccap + 0x10);
+    data_reg_lo32 = cfgspace_readd(&cs, dvseccap + 0x14);
+    data_reg_hi32 = cfgspace_readd(&cs, dvseccap + 0x18);
+
+    auto_increment = ctrl_reg >> 15;
+    domain = ctrl_reg & 0xff;
+
+    switch (domain) {
+    case PCIE_REGS_DVSEC_DOMAIN_NONE:
+        /* nothing to do, blindly report success */
+        cfgspace_setw(&cs, dvseccap + 0xC, PCIE_REGS_DVSEC_STATUS_SUCCESS);
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    case PCIE_REGS_DVSEC_DOMAIN_CNM:
+    case PCIE_REGS_DVSEC_DOMAIN_TX:
+    case PCIE_REGS_DVSEC_DOMAIN_RX:
+    case PCIE_REGS_DVSEC_DOMAIN_PCS:
+        /* TODO: validate the lane in cfgspace w.r.t. link lane organisation. pcieawd isn't aware of this mapping */
+        rc = pciehw_cfgwr_dvsec_serdes_regs(hctx->port, domain, lane_reg, off_reg, data_reg_lo32);
+        (void)data_reg_hi32; /* not being used by serdes */
+        break;
+    default:
+        cfgspace_setw(&cs, dvseccap + 0xC, PCIE_REGS_DVSEC_STATUS_EINVAL);
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    }
+
+    switch (rc) {
+    case 0:
+        status = PCIE_REGS_DVSEC_STATUS_SUCCESS;
+        break;
+    case 22 /*EINVAL*/:
+        status = PCIE_REGS_DVSEC_STATUS_EINVAL;
+        break;
+    case 34 /*ERANGE*/:
+        status = PCIE_REGS_DVSEC_STATUS_ERANGE;
+        break;
+    default:
+        pciesvc_logerror("Unexpected errno (%d) from serdes reg write\n", rc);
+        status = PCIE_REGS_DVSEC_STATUS_EINVAL;
+        break;
+    }
+
+    cfgspace_setw(&cs, dvseccap + 0xC, status);
+
+    if (status != PCIE_REGS_DVSEC_STATUS_SUCCESS) {
+        /* Nothing else to do if we failed */
+        pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
+        pciehwdev_put(phwdev, CLEAN);
+        return;
+    }
+
+    if (auto_increment) {
+        off_reg += 4;
+        cfgspace_writed(&cs, dvseccap + 0x10, off_reg);
+    }
+
+    pciesvc_cfgspace_put(hctx->hwdevh, &cs, DIRTY);
     pciehwdev_put(phwdev, CLEAN);
 }
 
@@ -860,6 +1259,9 @@ pciehw_cfgrd_handler(handler_ctx_t *hctx)
         break;
     case PCIEHW_CFGHND_DBG_DELAY:
         pciehw_cfgrd_delay(hctx);
+        break;
+    case PCIEHW_CFGHND_DVSEC_INTERNAL_REGS:
+        pciehw_cfgrd_dvsec_internal_regs(hctx);
         break;
     }
 }
@@ -909,6 +1311,9 @@ pciehw_cfgwr_handler(const handler_ctx_t *hctx)
         break;
     case PCIEHW_CFGHND_SRIOV_BARS:
         pciehw_cfgwr_sriov_bars(hctx);
+        break;
+    case PCIEHW_CFGHND_DVSEC_INTERNAL_REGS:
+        pciehw_cfgwr_dvsec_internal_regs(hctx);
         break;
     }
 }
@@ -968,7 +1373,7 @@ pciehw_cfgrd_indirect(const int port, indirect_entry_t *ientry)
      */
     pciesvc_cfgspace_get(hctx.hwdevh, &cs);
     cfgspace_read(&cs, hctx.stlp.addr, hctx.stlp.size, &hctx.retval);
-    pciesvc_cfgspace_put(&cs, CLEAN);
+    pciesvc_cfgspace_put(hctx.hwdevh, &cs, CLEAN);
 
     pciehw_cfgrd_handler(&hctx);
 
@@ -998,7 +1403,7 @@ pciehw_cfgwr_indirect(const int port, indirect_entry_t *ientry)
 
 #ifdef PCIEMGR_DEBUG
     pciesvc_logdebug("cfgwr_indirect: "
-                     "hwdevh %d vfid %d wr 0x%lx sz %d data 0x%lx\n",
+                     "hwdevh %d vfid %d wr 0x%llx sz %d data 0x%llx\n",
                      hctx.hwdevh, ientry->info.vfid,
                      hctx.stlp.addr, hctx.stlp.size, hctx.stlp.data);
 #endif
@@ -1009,7 +1414,7 @@ pciehw_cfgwr_indirect(const int port, indirect_entry_t *ientry)
      */
     pciesvc_cfgspace_get(hctx.hwdevh, &cs);
     r = cfgspace_write(&cs, hctx.stlp.addr, hctx.stlp.size, hctx.stlp.data);
-    pciesvc_cfgspace_put(&cs, DIRTY);
+    pciesvc_cfgspace_put(hctx.hwdevh, &cs, DIRTY);
 
     if (r < 0) {
         ientry->cpl = PCIECPL_CA;
@@ -1026,15 +1431,30 @@ void
 pciehw_cfg_reset(pciehwdev_t *phwdev, const pciesvc_rsttype_t rsttype)
 {
     cfgspace_t cs;
-    u_int16_t cfgsz, cmd;
+    u_int16_t cfgsz, cmd, pciecap, devctl, maxpayload;
 
     pciesvc_cfgspace_get(pciehwdev_geth(phwdev), &cs);
     cfgsz = cfgspace_size(&cs);
+
+    /* save maxpayload setting before reset */
+    pciecap = cfgspace_findcap(&cs, PCI_CAP_ID_EXP);
+    if (pciecap) {
+        devctl = cfgspace_readw(&cs, pciecap + PCI_EXP_DEVCTL);
+        maxpayload = devctl & PCI_EXP_DEVCTL_PAYLOAD;
+    }
 
     /*****************
      * reset cfg space
      */
     pciesvc_memcpy_toio(cs.cur, cs.rst, cfgsz);
+
+    /* maxpayload setting preserved across FLR, restore saved value */
+    if (rsttype == PCIESVC_RSTTYPE_FLR && pciecap) {
+        devctl = cfgspace_readw(&cs, pciecap + PCI_EXP_DEVCTL);
+        devctl &= ~PCI_EXP_DEVCTL_PAYLOAD;
+        devctl |= maxpayload;
+        cfgspace_writew(&cs, pciecap + PCI_EXP_DEVCTL, devctl);
+    }
 
     /* Read reset value for cmd */
     cmd = cfgspace_readw(&cs, PCI_COMMAND);
@@ -1043,7 +1463,8 @@ pciehw_cfg_reset(pciehwdev_t *phwdev, const pciesvc_rsttype_t rsttype)
 
     /* bridge just reset secbus to reset value=0 */
     if (cfgspace_get_headertype(&cs) == 0x1) {
-        pciehw_bridge_secbus(phwdev);
+        const int is_reset = 1;
+        pciehw_bridge_secbus(phwdev, is_reset);
     }
 
     if (phwdev->pf) {
@@ -1062,11 +1483,11 @@ pciehw_cfg_reset(pciehwdev_t *phwdev, const pciesvc_rsttype_t rsttype)
         }
 
         /* release our cfgspace before resetting vfs */
-        pciesvc_cfgspace_put(&cs, DIRTY);
+        pciesvc_cfgspace_put(pciehwdev_geth(phwdev), &cs, DIRTY);
 
         pciehw_sriov_ctrl(phwdev, sriovctrl, numvfs);
         /* XXX Reset VF bar addrs? */
     } else {
-        pciesvc_cfgspace_put(&cs, DIRTY);
+        pciesvc_cfgspace_put(pciehwdev_geth(phwdev), &cs, DIRTY);
     }
 }

@@ -9,6 +9,7 @@
 #include "notify.h"
 #include "serial.h"
 #include "virtio.h"
+#include "gve.h"
 #include "pmt.h"
 
 static pciehwbar_t *
@@ -84,7 +85,8 @@ pciehw_barrw_notify(const pciesvc_event_t evtype,
                     pciehwdev_t *phwdev,
                     const pcie_stlp_t *stlp,
                     const tlpauxinfo_t *info,
-                    const pciehw_spmt_t *spmt)
+                    const pciehw_spmt_t *spmt,
+                    const u_int64_t opaque)
 {
     const pciehwbar_t *phwbar = pciehw_bar_get(phwdev, spmt->cfgidx);
     pciesvc_eventdata_t evd;
@@ -101,6 +103,7 @@ pciehw_barrw_notify(const pciesvc_event_t evtype,
     memrw->size = stlp->size;
     memrw->localpa = info->direct_addr;
     memrw->data = stlp->data; /* data, if write or hacked in */
+    memrw->opaque = opaque;
     pciesvc_event_handler(&evd, sizeof(evd));
 }
 
@@ -109,13 +112,13 @@ pciehw_barrd_notify(const int port, notify_entry_t *nentry)
 {
     const tlpauxinfo_t *info = &nentry->info;
     const pciehw_spmt_t *spmt = pciesvc_spmt_get(info->pmti);
-    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner);
+    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner + info->vfid);
     pcie_stlp_t stlpbuf, *stlp = &stlpbuf;
 
     pcietlp_decode(stlp, nentry->rtlp, sizeof(nentry->rtlp));
 
     pciehw_barrw_notify(PCIESVC_EV_MEMRD_NOTIFY,
-                        port, phwdev, stlp, info, spmt);
+                        port, phwdev, stlp, info, spmt, 0);
 
     pciehwdev_put(phwdev, CLEAN);
     pciesvc_spmt_put(spmt, CLEAN);
@@ -126,13 +129,13 @@ pciehw_barwr_notify(const int port, notify_entry_t *nentry)
 {
     const tlpauxinfo_t *info = &nentry->info;
     const pciehw_spmt_t *spmt = pciesvc_spmt_get(info->pmti);
-    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner);
+    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner + info->vfid);
     pcie_stlp_t stlpbuf, *stlp = &stlpbuf;
 
     pcietlp_decode(stlp, nentry->rtlp, sizeof(nentry->rtlp));
 
     pciehw_barrw_notify(PCIESVC_EV_MEMWR_NOTIFY,
-                        port, phwdev, stlp, info, spmt);
+                        port, phwdev, stlp, info, spmt, 0);
 
     pciehwdev_put(phwdev, CLEAN);
     pciesvc_spmt_put(spmt, CLEAN);
@@ -143,7 +146,7 @@ pciehw_barrd_indirect(const int port, indirect_entry_t *ientry)
 {
     const tlpauxinfo_t *info = &ientry->info;
     const pciehw_spmt_t *spmt = pciesvc_spmt_get(info->pmti);
-    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner);
+    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner + info->vfid);
     const pciehwbar_t *phwbar = pciehw_bar_get(phwdev, spmt->cfgidx);
 
     switch (phwbar->hnd) {
@@ -162,19 +165,39 @@ pciehw_barrd_indirect(const int port, indirect_entry_t *ientry)
         pcie_stlp_t stlpbuf, *stlp = &stlpbuf;
         u_int64_t baroff;
         u_int8_t do_notify = 0;
+        u_int64_t opaque = 0;
 
         pcietlp_decode(stlp, ientry->rtlp, sizeof(ientry->rtlp));
         baroff = stlp->addr - phwbar->addr;
         ientry->data[0] = virtio_barrd(phwdev, info->direct_addr, baroff,
+                            info->direct_size, &do_notify, &opaque);
+
+        stlp->data = ientry->data[0]; // HACK so logging shows real value
+
+        if (do_notify) {
+            pciehw_barrw_notify(PCIESVC_EV_MEMRD_NOTIFY,
+                       port, phwdev, stlp, info, spmt, opaque);
+        }
+
+        break;
+    }
+
+    case PCIEHW_BARHND_GVE: {
+        pcie_stlp_t stlpbuf, *stlp = &stlpbuf;
+        u_int64_t baroff;
+        u_int8_t do_notify = 0;
+
+        pcietlp_decode(stlp, ientry->rtlp, sizeof(ientry->rtlp));
+        baroff = stlp->addr - phwbar->addr;
+        ientry->data[0] = gve_barrd(phwdev, info->direct_addr, baroff,
                             info->direct_size, &do_notify);
 
         stlp->data = ientry->data[0]; // HACK so logging shows real value
 
         if (do_notify) {
             pciehw_barrw_notify(PCIESVC_EV_MEMRD_NOTIFY,
-                       port, phwdev, stlp, info, spmt);
+                        port, phwdev, stlp, info, spmt, 0);
         }
-
         break;
     }
 
@@ -197,7 +220,7 @@ pciehw_barwr_indirect(const int port, indirect_entry_t *ientry)
 {
     const tlpauxinfo_t *info = &ientry->info;
     const pciehw_spmt_t *spmt = pciesvc_spmt_get(info->pmti);
-    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner);
+    pciehwdev_t *phwdev = pciehwdev_get(spmt->owner + info->vfid);
     const pciehwbar_t *phwbar = pciehw_bar_get(phwdev, spmt->cfgidx);
     pcie_stlp_t stlpbuf, *stlp = &stlpbuf;
 
@@ -217,13 +240,30 @@ pciehw_barwr_indirect(const int port, indirect_entry_t *ientry)
         const u_int64_t baroff = stlp->addr - phwbar->addr;
         const u_int32_t size = info->direct_size;
         u_int8_t do_notify = 0;
+        u_int64_t opaque = 0;
 
         virtio_barwr(phwdev, info->direct_addr, baroff, size, stlp->data,
-                     &do_notify);
+                     &do_notify, &opaque);
 
         if (do_notify) {
             pciehw_barrw_notify(PCIESVC_EV_MEMWR_NOTIFY,
-                                port, phwdev, stlp, info, spmt);
+                                port, phwdev, stlp, info, spmt, opaque);
+        }
+
+        break;
+    }
+
+    case PCIEHW_BARHND_GVE: {
+        const u_int64_t baroff = stlp->addr - phwbar->addr;
+        const u_int32_t size = info->direct_size;
+        u_int8_t do_notify = 0;
+
+        gve_barwr(phwdev, info->direct_addr, baroff, size, stlp->data,
+                  &do_notify);
+
+        if (do_notify) {
+            pciehw_barrw_notify(PCIESVC_EV_MEMWR_NOTIFY,
+                                port, phwdev, stlp, info, spmt, 0);
         }
 
         break;

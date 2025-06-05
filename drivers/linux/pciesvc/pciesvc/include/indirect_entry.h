@@ -30,6 +30,8 @@ typedef enum {
 
 typedef struct indirect_entry_s {
     u_int32_t port;
+    u_int32_t pndtm;                    /* pending time, waiting for sw service */
+    u_int32_t svc_start_tm;             /* serivce start time */
     pciecpl_t cpl;                      /* PCIECPL_* completion type */
     u_int32_t completed:1;              /* completion has been delivered */
     u_int32_t data[4];

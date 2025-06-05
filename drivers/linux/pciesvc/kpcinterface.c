@@ -9,10 +9,19 @@
  * Author: rob.gardner@oracle.com
  */
 
-#include "kpcimgr_api.h"
-#include "pciesvc.h"
-#include "pciesvc_system.h"
+#include "pciesvc_impl.h"
 #include "version.h"
+
+void kpcimgr_init_fn(kstate_t *ks);
+void kpcimgr_version_fn(char **version);
+void kpcimgr_undefined_entry(void);
+void kpcimgr_init_intr(kstate_t *ks);
+int kpcimgr_ind_intr(kstate_t *ks, int port);
+int kpcimgr_not_intr(kstate_t *ks, int port);
+void *kpcimgr_va_get(unsigned long pa, unsigned long sz);
+void wakeup_event_queue(void);
+int pciesvc_sysfs_cmd_read(kstate_t *ks, char *buf, loff_t off, size_t count, int *exists);
+int pciesvc_sysfs_cmd_write(kstate_t *ks, char *buf, loff_t off, size_t count, int *exists);
 
 /*
  * This file contains only functions essential to the
@@ -251,16 +260,6 @@ pciesvc_reg_rd32(const uint64_t pa)
     return val;
 }
 
-static inline void
-pciesvc_reg_rd32w(const uint64_t pa, uint32_t *w, const uint32_t nw)
-{
-    int i;
-
-    for (i = 0; i < nw; i++) {
-        w[i] = pciesvc_reg_rd32(pa + (i * 4));
-    }
-}
-
 void
 pciesvc_pciepreg_rd32(const uint64_t pa, uint32_t *dest)
 {
@@ -284,16 +283,6 @@ pciesvc_reg_wr32(const uint64_t pa, const uint32_t val)
 
     pciesvc_assert((pa & 0x3) == 0);
     writel(val, va);
-}
-
-static inline void
-pciesvc_reg_wr32w(const uint64_t pa, const uint32_t *w, const uint32_t nw)
-{
-    int i;
-
-    for (i = 0; i < nw; i++) {
-        pciesvc_reg_wr32(pa + (i * 4), w[i]);
-    }
 }
 
 /*
@@ -405,6 +394,21 @@ pciesvc_memset(void *s, int c, size_t n)
 	return s;
 }
 
+/*
+ * Some compilers (e.g. gcc version 12 -ftrivial-auto-var-init=zero)
+ * insert memset calls to initialize stack variables.  We don't want
+ * this module to contain any external references to memset/memcpy that
+ * will not be available when running in physical mode during kexec.
+ * Provide this weak version to satisfy any compiler-generated
+ * references.
+ */
+#undef memset
+void * __attribute__((weak))
+memset(void *s, int c, size_t n)
+{
+	return pciesvc_memset(s, c, n);
+}
+
 void *
 pciesvc_memcpy(void *dst, const void *src, size_t n)
 {
@@ -418,10 +422,17 @@ pciesvc_memcpy(void *dst, const void *src, size_t n)
 	return dst;
 }
 
+#undef memcpy
+void * __attribute__((weak))
+memcpy(void *dst, const void *src, size_t n)
+{
+	return pciesvc_memcpy(dst, src, n);
+}
+
 void *
 pciesvc_memcpy_toio(void *dsthw, const void *src, size_t n)
 {
-    return pciesvc_memcpy(dsthw, src, n);
+	return pciesvc_memcpy(dsthw, src, n);
 }
 
 void *
@@ -565,3 +576,5 @@ int pciesvc_sysfs_cmd_write(kstate_t *ks, char *buf, loff_t off, size_t count, i
 	ret = pciesvc_cmd_write(buf, off, count);
 	return ret < 0 ? -EINVAL : ret;
 }
+
+void pciesvc_get_timestamp(uint64_t *ts) { }

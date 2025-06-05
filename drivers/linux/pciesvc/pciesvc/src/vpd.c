@@ -5,6 +5,9 @@
 
 #include "pciesvc_impl.h"
 
+uint32_t pciehw_vpd_read(const pciehwdevh_t hwdevh, const uint16_t addr);
+void pciehw_vpd_write(const pciehwdevh_t hwdevh, const uint16_t addr, const uint32_t data);
+
 uint32_t
 pciehw_vpd_read(const pciehwdevh_t hwdevh, const uint16_t addr)
 {

@@ -25,6 +25,7 @@ void pciehw_bar_load(pciehwdev_t *phwdev, pciehwbar_t *phwbar);
 void pciehw_cfg_load(pciehwdev_t *phwdev);
 void pciehw_pmt_setaddr(pciehwbar_t *phwbar, const u_int64_t addr);
 void pciehw_reset_bus(pciehwdev_t *phwdev, const u_int8_t bus);
+void pciehw_mgmtchg_event(pciehwdev_t *phwdev);
 uint32_t pciehw_vpd_read(pciehwdevh_t hwdevh, const uint16_t addr);
 void pciehw_vpd_write(pciehwdevh_t hwdevh,
                       const uint16_t addr, const uint32_t data);
@@ -54,6 +55,12 @@ int prt_alloc(const int n);
 void prt_free(const int prtbase, const int prtcount);
 void prt_get(const int prti, prt_t *prt);
 void prt_set(const int prti, const prt_t *prt);
+
+struct cfgspace_s; typedef struct cfgspace_s cfgspace_t;
+void pciesvc_cfgspace_get(const pciehwdevh_t hwdevh, cfgspace_t *cs);
+void pciesvc_cfgspace_put(const pciehwdevh_t hwdevh,
+                          const cfgspace_t *cs,
+                          const int dirty);
 
 #ifdef __cplusplus
 }

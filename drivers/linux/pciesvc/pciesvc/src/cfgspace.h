@@ -26,6 +26,9 @@ cfgspace_size(cfgspace_t *cs)
     return cs->size;
 }
 
+u_int16_t _pciesvc_cfgspace_get_status(cfgspace_t *cs);
+u_int8_t _pciesvc_cfgspace_get_cap(cfgspace_t *cs);
+
 /* rename these to avoid static link dups */
 #define cfgspace_get_status     _pciesvc_cfgspace_get_status
 #define cfgspace_get_cap        _pciesvc_cfgspace_get_cap
@@ -43,6 +46,9 @@ cfgspace_size(cfgspace_t *cs)
 #define cfgspace_writew         _pciesvc_cfgspace_writew
 #define cfgspace_writed         _pciesvc_cfgspace_writed
 #define cfgspace_write          _pciesvc_cfgspace_write
+#define cfgspace_setb           _pciesvc_cfgspace_setb
+#define cfgspace_setw           _pciesvc_cfgspace_setw
+#define cfgspace_setd           _pciesvc_cfgspace_setd
 
 /*
  * Access specific config space registers.
@@ -86,6 +92,15 @@ int cfgspace_write(cfgspace_t *cs,
                    const u_int16_t offset,
                    const u_int8_t size,
                    const u_int32_t val);
+
+/* Additional config space accessors for write. They bypass the write-mask, useful for implementing things such as
+ * status registers which are read-only from the host perspective. In doubt, prefer to use cfgspace_write* APIs. */
+void cfgspace_setb(cfgspace_t *cs,
+                     const u_int16_t offset, const u_int8_t val);
+void cfgspace_setw(cfgspace_t *cs,
+                     const u_int16_t offset, const u_int16_t val);
+void cfgspace_setd(cfgspace_t *cs,
+                     const u_int16_t offset, const u_int32_t val);
 
 #ifdef __cplusplus
 }
