@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, 2025, Oracle and/or its affiliates.
  */
 
 /*
@@ -11,17 +11,7 @@
 
 #include "pciesvc_impl.h"
 #include "version.h"
-
-void kpcimgr_init_fn(kstate_t *ks);
-void kpcimgr_version_fn(char **version);
-void kpcimgr_undefined_entry(void);
-void kpcimgr_init_intr(kstate_t *ks);
-int kpcimgr_ind_intr(kstate_t *ks, int port);
-int kpcimgr_not_intr(kstate_t *ks, int port);
-void *kpcimgr_va_get(unsigned long pa, unsigned long sz);
-void wakeup_event_queue(void);
-int pciesvc_sysfs_cmd_read(kstate_t *ks, char *buf, loff_t off, size_t count, int *exists);
-int pciesvc_sysfs_cmd_write(kstate_t *ks, char *buf, loff_t off, size_t count, int *exists);
+#include "kpci_uart.h"
 
 /*
  * This file contains only functions essential to the
@@ -36,7 +26,69 @@ void kpcimgr_init_fn(kstate_t *ks)
 void kpcimgr_version_fn(char **version)
 {
 	if (version)
-		*version = PCIESVC_VERSION;
+		*version = PCIESVC_VERSION;  /* this must be an address in .rodata.str */
+}
+
+long using_psci, using_xen, protected_read;
+long uart_data_reg, uart_status_reg;
+long pciesvc_features = FLAG_PSCI | FLAG_GUEST;
+
+void set_uart_regs(long uart_addr)
+{
+	kstate_t *ks = get_kstate();
+
+	uart_data_reg = uart_addr;
+	if (ks->features & FLAG_GUEST)
+		uart_status_reg = uart_addr + UART_PL011_FR;
+	else
+		uart_status_reg = uart_addr + NS16550_LSR;
+}
+
+/*
+ * This gets called by kpcimgr in various places in newer kernels, and we
+ * also get here via the below kpcimgr_init_intr to ensure that we always
+ * get called. When we arrive here via init_intr called by an older
+ * kernel (with no features) we do nothing and default to no xen, no psci,
+ * and ns16550 uart addresses.
+ */
+void kpcimgr_features(long *features, long dummy1, long dummy2, long dummy3)
+{
+	kstate_t *ks = get_kstate();
+	extern long kstate_paddr;
+
+	/* if we are called from an old kernel, do nothing */
+	if (ks->features_valid != KSTATE_MAGIC)
+		return;
+
+	if (features)
+		*features = pciesvc_features;
+/*
+ * Setting kstate_paddr here works because we are always called *before* kpcimgr
+ * copies the pciesvc code/data out to persistent memory. This is better than the
+ * old way, when kstate_paddr was passed into entry_fn, which had to jump through
+ * hoops to propagate the kstate_paddr value to the data segment that had already
+ * been copied out.
+ */
+	kstate_paddr = ks->kstate_paddr;
+
+	if (ks->features & FLAG_PSCI)
+		using_psci = 1;
+	if (ks->features & FLAG_GUEST)
+		using_xen = ~0LL;
+
+	/* set uart regs */
+	set_uart_regs((long)ks->uart_addr);  /* always called in virtual mode */
+}
+
+/*
+ * Called just as the kernel is going down for a kexec reboot
+ */
+void kpcimgr_reboot(long dummy0, long dummy1, long dummy2, long dummy3)
+{
+	kstate_t *ks = get_kstate();
+
+	set_uart_regs(ks->uart_paddr);	/* set to physical address */
+	kpr_err("%s: pciesvc ack kexec\n", __func__);
 }
 
 /*
@@ -44,7 +96,7 @@ void kpcimgr_version_fn(char **version)
  */
 void kpcimgr_undefined_entry(void)
 {
-	pciesvc_log(KERN_INFO "undefined entry called\n");
+	pciesvc_log(KERN_INFO "kpci: undefined entry called\n");
 }
 
 /*
@@ -56,6 +108,7 @@ void kpcimgr_init_intr(kstate_t *ks)
 	volatile struct msi_info *msi;
 
 	set_kstate(ks);
+	set_uart_regs((long)ks->uart_addr);	/* we are always called in virtual mode */
 	memset(&p, 0, sizeof(pciesvc_params_t));
 
 	p.version = 0;
@@ -251,7 +304,7 @@ u64 pciesvc_vtop(const void *hwmemva)
 uint32_t
 pciesvc_reg_rd32(const uint64_t pa)
 {
-    u_int32_t val, *va = kpcimgr_va_get(pa, 4);
+    u_int32_t val = ~0L, *va = kpcimgr_va_get(pa, 4);
 
     pciesvc_assert((pa & 0x3) == 0);
     val = readl(va);
@@ -266,6 +319,7 @@ pciesvc_pciepreg_rd32(const uint64_t pa, uint32_t *dest)
 	u_int32_t val, (*upcall)(int req, unsigned long pa);
 	kstate_t *ks = get_kstate();
 
+	protected_read = 1;
 	pciesvc_assert((pa & 0x3) == 0);
 	upcall = ks->upcall;
 	if (upcall && virtual())
@@ -274,6 +328,7 @@ pciesvc_pciepreg_rd32(const uint64_t pa, uint32_t *dest)
 		val = pciesvc_reg_rd32(pa);
 
 	*dest = val;
+	protected_read = 0;
 }
 
 void
@@ -462,6 +517,8 @@ pciesvc_log(const char *msg)
 	kstate_t *ks = get_kstate();
 	u64 (*upcall)(int req, char *msg);
 
+	if (ks == NULL)
+		return;
 	upcall = ks->upcall;
 	if (upcall && virtual())
 		upcall(PRINT_LOG_MSG, (char *)msg);
@@ -535,6 +592,10 @@ void pciesvc_debug_cmd(uint32_t *cmd)
 	switch (*cmd) {
 	case 0x17:
 		*cmd = virtual();
+		return;
+	case 0x18:
+		trigger_serr(0);
+		*cmd = 0x81;
 		return;
 	case 0x19:
 		*cmd = ks->cfgval;

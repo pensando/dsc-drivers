@@ -27,6 +27,8 @@
 #include <linux/elf.h>
 #include <linux/reboot.h>
 #include <linux/stacktrace.h>
+#include <linux/version.h>
+#include <linux/panic_notifier.h>
 #include <linux/of.h>
 #include "version.h"
 
@@ -78,14 +80,42 @@ kstate_t *get_kpci_state(void)
 	return kstate;
 }
 
+unsigned long lookup_routine(const char *rname)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	struct kprobe kp = { .symbol_name = "kallsyms_lookup_name" };
+	typedef unsigned long (*kallsyms_lookup_name_t)(const char *rname);
+	kallsyms_lookup_name_t kallsyms_lookup_name;
+	if (register_kprobe(&kp) != 0) {
+		pr_err("KPCIMGR: register_kprobe failed\n");
+		return 0;
+	}
+	kallsyms_lookup_name = (kallsyms_lookup_name_t)kp.addr;
+	unregister_kprobe(&kp);
+#endif
+
+	return kallsyms_lookup_name(rname);
+}
+
+
 /*
  * Allocate executable memory
  */
 void *vmalloc_exec(unsigned long size)
 {
-	pgprot_t prot = PAGE_KERNEL_EXEC;
 
-	return __vmalloc(size, GFP_KERNEL, prot);
+	static void *(*my_vmalloc_node_range)(unsigned long, unsigned long, unsigned long, unsigned long, 
+		gfp_t, pgprot_t, unsigned long, int, const void *) = NULL;
+		
+	if (!my_vmalloc_node_range)
+		my_vmalloc_node_range = (void *)lookup_routine("__vmalloc_node_range");
+
+	if (!my_vmalloc_node_range)
+		return NULL;
+
+	return my_vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END, GFP_KERNEL, PAGE_KERNEL_EXEC,
+		0, NUMA_NO_NODE, __builtin_return_address(0));
+
 }
 
 /*
@@ -111,11 +141,13 @@ int load_elf(void)
 	if (h->e_machine != EM_AARCH64)
 		return -ENOTTY;
 
+#define MAX(x,  y)   (((x) > (y)) ? (x) : (y))
+
 	/* determine memory needed for executable image */
 	sh = elfdata + h->e_shoff;
-	for (i=0; i < h->e_shnum; i++, sh++)
+	for (i=0, length=0; i < h->e_shnum; i++, sh++)
 		if (sh->sh_flags & SHF_ALLOC)
-			length = sh->sh_addr + sh->sh_size;
+			length = MAX(length, sh->sh_addr + sh->sh_size);
 
 	/* round up to page align */
 	bin_valid_bytes = length;
@@ -137,7 +169,7 @@ int load_elf(void)
 				memset(bin_image + sh->sh_addr, 0, sh->sh_size);
 			else
 				memcpy(bin_image + sh->sh_addr, elfdata + sh->sh_offset, sh->sh_size);
-			if (sh->sh_flags & SHF_EXECINSTR)
+			if (sh->sh_flags & SHF_EXECINSTR && strcmp(sh_strtbl + sh->sh_name, ".text") == 0)
 				start_offset = sh->sh_addr;
 		} else {
 			if (sh->sh_type == SHT_SYMTAB &&
@@ -178,6 +210,9 @@ static ssize_t run_store(struct device *dev,
 	ret = load_elf();
 	if (ret)
 		return ret;
+
+	/* NEW */
+	flush_icache_range((long)bin_image, (long)bin_image + bin_valid_bytes);
 
 	start_fn = bin_image + start_offset;
 	ep = start_fn(NULL);
@@ -382,19 +417,14 @@ static int pciesvc_panic(struct notifier_block *nb,
 			 unsigned long code, void *unused)
 {
 	unsigned long entries[48], offset, size;
-	struct stack_trace trace;
-	char *modname, buffer[256];
+	char *modname, buffer[KSYM_SYMBOL_LEN];
 	const char *name;
-	int i, len;
+	int i, len, nr_entries;
 
-	trace.nr_entries = 0;
-	trace.max_entries = ARRAY_SIZE(entries);
-	trace.entries = entries;
-	trace.skip = 0;
+	nr_entries = stack_trace_save(entries, ARRAY_SIZE(entries), 0);
 
-	save_stack_trace(&trace);
 	pr_emerg("pciesvc stack trace:\n");
-	for (i=0; i<trace.nr_entries; i++) {
+	for (i=0; i<nr_entries; i++) {
 		name = pciesvc_address_lookup(entries[i], &size, &offset,
 					      &modname, buffer);
 		if (name) {

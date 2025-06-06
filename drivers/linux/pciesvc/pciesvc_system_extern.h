@@ -149,6 +149,7 @@ static inline kstate_t *get_kstate(void)
 	return kstate;
 }
 
+#define BIT_ULL(nr)             ((1ULL) << (nr))
 #endif /* !KERNEL */
 
 
@@ -239,9 +240,8 @@ void kpcimgr_poll(kstate_t *ks, int index, int phase);
 /* functions in kpci_test.c */
 void kp_udelay(unsigned long us);
 int time_elapsed(unsigned long start, unsigned long elapsed);
-void _uart_write(unsigned char *reg, char c);
-void uart_write(kstate_t *ks, char c);
-int uart_read(kstate_t *ks, char *c);
+void uart_write( char c);
+int uart_read(char *c);
 void uart_write_debug(kstate_t *ks, char c);
 void kdbg_puts(const char *s);
 void trigger_serr(int val);
@@ -249,7 +249,5 @@ void kpcimgr_report_stats(kstate_t *ks, int phase, int always, int rightnow);
 
 /* functions in kpci_kexec.c */
 void set_kstate(kstate_t *ks);
-
-void pciesvc_get_timestamp(uint64_t *ts);
 
 #endif /* __PCIESVC_SYSTEM_EXTERN_H__ */
