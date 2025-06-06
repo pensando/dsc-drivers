@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, 2025, Oracle and/or its affiliates.
  */
 
 /*
@@ -13,24 +13,16 @@
 #include "pciesvc_impl.h"
 #include "pciesvc.h"
 #include "pciesvc_system.h"
+#include "kpci_uart.h"
 
-#define TICKS_PER_US 200
+#define TICKS_PER_US 200LL
 #define TICKS_PER_MS  (1000*TICKS_PER_US)
 #define TICKS_PER_SEC (1000*TICKS_PER_MS)
-
-void kpcimgr_nommu_poll(kstate_t *ks);
-void kpcimgr_cpu_holding_pen(kstate_t *ks);
-void serial_help(void);
-void set_cfgval(kstate_t *ks);
-void watchdog_reboot(void);
-void serial_input(char c);
-void kpcimgr_serial_thread(kstate_t *ks);
-unsigned long kpcimgr_get_holding_pen(unsigned long old_entry,
-				      unsigned int cpu, unsigned long ks_paddr);
 
 int holding_pen_idx;
 unsigned long kstate_paddr;
 kstate_t *kstate = NULL;
+long spin_table_start_addr;
 
 void set_kstate(kstate_t *ks)
 {
@@ -50,79 +42,97 @@ void kpcimgr_nommu_poll(kstate_t *ks)
 
 }
 
-void kpcimgr_cpu_holding_pen(kstate_t *ks)
+/*
+ * release
+ *
+ * Called to determine if we should complete the missions and
+ * return the borrowed cpu. Handles both PSCI and SPIN TABLE
+ */
+unsigned long release(void)
 {
-	long npolls = 0;
-	int i;
+	kstate_t *ks = get_kstate();
+
+	if (ks->features & FLAG_PSCI)
+		return ks->features & FLAG_PSCI_CPU_RELEASE;
+
+/*
+ * Could release spin table the same way as psci, but this
+ * is simpler and preserves compatibility with older kernels.
+ */
+	return *(long *)(spin_table_start_addr + 0x10);
+}
+
+/* This indicates to new kernel that we got the message to quit */
+void released(void)
+{
+	kstate_t *ks = get_kstate();
+	ks->features |= FLAG_PSCI_CPU_RELEASED;
+}
+	
+
+/*
+ * Main polling thread, call in no-mmu mode from a borrowed cpu
+ */
+void kpcimgr_cpu_polling_loop(kstate_t *ks)
+{
+#ifdef KPCI_DEVEL
+	unsigned long start = read_sysreg(cntvct_el0);
+#endif
+	extern void pciesvc_quit(void);
+	void serial_input(char c);
+	int i, npolls = 0;
+	char c;
 
 	set_kstate(ks);
-	ks->uart_addr = (void *) PEN_UART;
-	if (ks->debug)
-		_uart_write((void *) PEN_UART, 'C');
+	uart_write_debug(ks, 'C');
 	kpcimgr_init_poll(ks);
 
-	kpr_err("%s with EL%ld on cpu%d\n", __func__, read_el(), cpuid());
+	ks->running = cpuid();
+	kpr_err("\r\npciesvc: %s with EL%ld on cpu%d\n", __func__, read_el(), ks->running);
 
 	holding_pen_idx = 0;
-	kpr_err("going into poll loop...\n");
 
 	while (1) {
-		if (ks->debug)
-			_uart_write((void *) PEN_UART, 'S');
+		uart_write_debug(ks, 'S');
+                if (uart_read(&c))
+			serial_input(c);
 
 		kpcimgr_nommu_poll(ks);
 		npolls++;
 
 		for (i=0; i<10; i++) {
 			if (release()) {
+				kpr_err("pciesvc: did %d polls\n", npolls+1);
 				kpcimgr_nommu_poll(ks);
-				kpr_err("polling did %ld polls.\n", npolls);
 				return;
 			}
 			kp_udelay(1*1000); /* 1ms */
 		}
+#ifdef KPCI_DEVEL
+		if (time_elapsed(start, 60*TICKS_PER_SEC)) {
+			kpr_err("pciesvc: polling thread running for >60s, quitting.\n");
+			pciesvc_quit();
+		}
+#endif
 	}
 }
 
 void serial_help(void)
 {
 	kpr_err("Commands:\n");
+	kpr_err(" a      Show addresses and parameters\n");
 	kpr_err(" c      Cpu id\n");
 	kpr_err(" e      Event queue\n");
 	kpr_err(" f      Show/set cfgval\n");
 	kpr_err(" h      Show help message\n");
 	kpr_err(" m      Memory ranges\n");
-	kpr_err(" q      Quit serial thread\n");
+	kpr_err(" q      Quit thread\n");
 	kpr_err(" r      Reboot\n");
 	kpr_err(" s      Serror trigger\n");
 	kpr_err(" t      Report Stats\n");
-}
-
-void set_cfgval(kstate_t *ks)
-{
-	int cfgval = 0, modify = 0;
-	char c;
-
-	kpr_err("New cfgval: ");
-	while (1) {
-		while (uart_read(ks, &c) == 0);
-		uart_write(ks, c);
-		if (c >= '0' && c <= '9')
-			cfgval = (cfgval << 4) + (c - '0');
-		else if (c >= 'a' && c <= 'f')
-			cfgval = (cfgval << 4) + (10 + c - 'a');
-		else if (c >= 'A' && c <= 'F')
-			cfgval = (cfgval << 4) + (10 + c - 'A');
-		else
-			break;
-		modify = 1;
-	}
-	if (modify) {
-		kpr_err("\r\ncfgval set to %x\n", cfgval);
-		ks->cfgval = cfgval;
-	}
-	else
-		kpr_err("\r\ncfgval not modified\n");
+#ifdef KPCI_DEVEL
+	kpr_err(" u      Unstick kernel (testing only)\n");
+#endif
 }
 
 #define WDOG_REGS (void *)0x1400
@@ -141,25 +151,139 @@ void watchdog_reboot(void)
         writel(val, WDOG_REGS + WDOG_CONTROL_REG_OFFSET);
 }
 
+#define NORMAL_INPUT 1
+#define CFGVAL_INPUT 2
 
+/*
+ * is_hexdigit
+ *
+ * if char c is a valid hex digit, then set *val to the
+ * numerical value of that digit
+ */
+int is_hexdigit(char c, int *val)
+{
+	if (c >= '0' && c <= '9')
+		*val = c - '0';
+	else if (c >= 'a' && c <= 'f')
+		*val = 10 + c - 'a';
+	else if (c >= 'A' && c <= 'F')
+		*val = 10 + c - 'A';
+	else
+		return 0;
+	return 1;
+}
+
+/*
+ * cfgval_process
+ *
+ * Implement a tiny state machine to build up a hex value
+ * gathered from reading characters from the uart. This
+ * allows to basically read a bunch of characters from the
+ * serial port without waiting, thus allowing us to get by
+ * with just one thread.
+ *
+ * Return value of 1 indicates that we've processed the
+ * character, otherwise the caller should process it.
+ */
+int cfgval_process(char c)
+{
+	static int cfgval = 0, modify = 0;
+	static int state = NORMAL_INPUT;
+	kstate_t *ks = get_kstate();
+	int nibble;
+
+	if (state == NORMAL_INPUT) {
+		if (c == 'f' || c == 'F') {
+			kpr_err("cfgval = %x\n", ks->cfgval);
+			kpr_err("New cfgval: ");
+			state = CFGVAL_INPUT;
+			return 1;	/* swallow character */
+		}
+		return 0;	/* ignore character */
+	}
+
+	/* at this point we are in CFGVAL_INPUT state */
+	uart_write(c);	/* echo typed character */
+	if (is_hexdigit(c, &nibble)) {
+		cfgval = (cfgval << 4) + nibble;
+		modify = 1;
+		return 1;
+	}		
+
+	/*
+ 	 * at this point, input has complete, so possibly
+ 	 * modify the actual cfgval, then clean up
+ 	 */
+	if (modify) {
+		kpr_err("\r\ncfgval set to %x\n", cfgval);
+		ks->cfgval = cfgval;
+	}
+	else {
+		kpr_err("\r\ncfgval not modified\n");
+	}
+
+	cfgval = 0;
+	modify = 0;
+	state = NORMAL_INPUT;
+
+	return 1;
+}
+
+/*
+ * serial_input
+ *
+ * Simple menu of options presented during the kexec reboot.
+ * Normally, you'd only have a few hundred milliseconds to
+ * interact with this, but if something goes wrong (ie, system
+ * never reboots) then there will be additional time.
+ *
+ * A testing strategy is to insert code into the kernel at
+ * arch/arm64/kernel/relocate_kernel.S that spins waiting for
+ * notification. The 'u'nstick command below sets a byte
+ * in ks->lib_version_major that is examined by relocate_kernel:
+
+   ldr  x16, hardcoded_kstate_addr
+1: ldrb w0, [x16, #0x15]
+   cbz  w0, 1b
+   ...
+.align 3
+hardcoded_kstate_addr: .quad 0xc5f8d000
+
+*/
 void serial_input(char c)
 {
+	extern int pciesvc_version_major, pciesvc_version_minor;   
+	extern long uart_data_reg, uart_status_reg;
+	void kpcimgr_version_fn(char **);
+	extern void pciesvc_quit(void);
+	extern long using_psci, using_xen;
+	extern long protected_read;
 	kstate_t *ks = get_kstate();
+	char *version;
 	int n;
 
+	if (cfgval_process(c))
+		return;
+
 	switch (c) {
+	case 'a': case 'A':
+		kpcimgr_version_fn(&version);
+		kpr_err("Library version %d.%d, %s\n",
+			pciesvc_version_major, pciesvc_version_minor, version);
+		kpr_err("kstate_paddr= %lx, xen=%d, psci=%d, uart_data=%lx, uart_status=%lx\n",
+			kstate_paddr, using_xen, using_psci,
+			uart_data_reg, uart_status_reg);
+		kpr_err("protected_read=%d, debug progress=%x\n",
+			protected_read, ks->lib_version_major);
+		break;
 	case 'c': case 'C':
-		kpr_err("serial thread running on cpu#%d\n", cpuid());
+		kpr_err("thread running on cpu#%d\n", cpuid());
 		break;
 	case 'e': case 'E':
 		n = ks->evq_head - ks->evq_tail;
 		if (n < 0)
 			n += EVENT_QUEUE_LENGTH;
 		kpr_err("event queue contains %d records\n", n);
-		break;
-	case 'f': case 'F':
-		kpr_err("cfgval = %x\n", ks->cfgval);
-		set_cfgval(ks);
 		break;
 	case '?':
 	case 'h':
@@ -174,18 +298,23 @@ void serial_input(char c)
 		}
 		break;
 	case 'q': case 'Q':
-		__asm__("hvc #0;" ::);
+		ks->features |= FLAG_PSCI_CPU_RELEASE;
+		pciesvc_quit();
 		break;
 	case 'r': case 'R':
 		watchdog_reboot();
 		break;
 	case 's':
 	case 'S':
-		trigger_serr(0x100);
+		trigger_serr(0);
 		break;
 	case 't':
 	case 'T':
 		kpcimgr_report_stats(ks, NOMMU, 1, 1);
+		break;
+	case 'u':
+	case 'U':
+		ks->lib_version_major |= 0xee00;
 		break;
 	default:
 		kpr_err("'%c' unknown command\n", c);
@@ -193,26 +322,28 @@ void serial_input(char c)
 	}
 }
 
-
+/*
+ * serial thread is not used anymore, but leaving
+ * it here as an example
+ */
 void kpcimgr_serial_thread(kstate_t *ks)
 {
 	unsigned long start = read_sysreg(cntvct_el0);
 	int warning_printed = 0;
 
-	ks->uart_addr = (void *) PEN_UART;
 	set_kstate(ks);
 
-	kpr_err("%s el%d on cpu%d\n", __func__, read_el(), cpuid());
+	kpr_err("pciesvc: %s el%d on cpu%d\n", __func__, read_el(), cpuid());
 	while (!release()) {
 		char c;
-		if (uart_read(ks, &c))
+		if (uart_read(&c))
 			serial_input(c);
 		if (!warning_printed && time_elapsed(start, 2*TICKS_PER_SEC)) {
-			kpr_err("Serial thread running for >2s, 'H' for help\n");
+			kpr_err("pciesvc: serial thread running for >2s, 'H' for help\n");
 			warning_printed = 1;
 		}
 	}
-	kpr_err("%s done\n", __func__);
+	kpr_err("pciesvc: %s done\n", __func__);
 }
 
 
@@ -228,14 +359,14 @@ void kpcimgr_serial_thread(kstate_t *ks)
  *    No, it cannot, because we are called by kpcimgr_get_entry(),
  *    which protects against this with a spinlock.
  *
- * 2. holding_pen_idx is reset to zero in kpcimgr_cpu_holding_pen(),
+ * 2. holding_pen_idx is reset to zero in kpcimgr_cpu_polling_loop(),
  *    and can't that execute on CPU1 while this function executes
  *    concurrently on CPU2?
  *    Good question! The answer is yes, they can execute
  *    simultaneously, but it is not a race because they will operate
  *    on different memory.  When this function is called, it is in
  *    virtual mode, with the code and data in normal module_alloc'ed
- *    memory. But when kpcimgr_cpu_holding_pen() executes, it is
+ *    memory. But when kpcimgr_cpu_polling_loop() executes, it is
  *    running in physical mode from a copy of the code and data that
  *    has been relocated to persistent memory. Thus, references to
  *    'holding_pen_idx' in these two functions refer to different
@@ -249,6 +380,7 @@ unsigned long kpcimgr_get_holding_pen(unsigned long old_entry,
 	unsigned long offset, entry;
 	extern void __kpcimgr_cpu_holding_pen(void);
 	extern void __kpcimgr_serial_thread(void);
+	extern long uart_data_reg, uart_status_reg;
 
 	if (ks == NULL || ks->valid != KSTATE_MAGIC || !ks->running || !ks->have_persistent_mem)
 		return old_entry;
@@ -256,17 +388,19 @@ unsigned long kpcimgr_get_holding_pen(unsigned long old_entry,
 	if (cpu == 0)
 		return old_entry;
 
+	holding_pen_idx++;
 	switch (holding_pen_idx) {
-	case 0:
+	case 1:
 		offset = (unsigned long) __kpcimgr_cpu_holding_pen - (unsigned long) ks->code_base;
 		break;
-	case 1:
+#if 0
+	case 2:
 		offset = (unsigned long) __kpcimgr_serial_thread - (unsigned long) ks->code_base;
 		break;
+#endif
 	default:
 		return old_entry;
 	}
-	holding_pen_idx++;
 
 #if 1
 	/* temp: stay compatible with old kernel */
@@ -274,10 +408,18 @@ unsigned long kpcimgr_get_holding_pen(unsigned long old_entry,
 		ks_paddr = ks->shmembase + COMPAT_SHMEM_KSTATE_OFFSET;
 #endif
 	entry = ks_paddr + KSTATE_CODE_OFFSET + offset;
-	kpr_err("%s(cpu%d) entry = %lx\n", __func__, cpu, entry);
+	kpr_err("pciesvc: %s(cpu%d) entry = %lx; ks_paddr=%lx\n", __func__, cpu, entry, ks_paddr);
 
-	/* propagate value of ks_paddr to persistent memory */
-	offset = ((unsigned long) &kstate_paddr) - (unsigned long) ks->code_base;
-	*(unsigned long *)(ks->persistent_base + offset) = ks_paddr;
+	/* In old kernel, propagate values of various phys addresses to persistent memory */
+#define PROPAGATE(TARGET, SOURCE) \
+	offset = ((unsigned long) &TARGET) - (unsigned long) ks->code_base; \
+	*(unsigned long *)(ks->persistent_base + offset) = SOURCE;
+
+	if (ks->features_valid != KSTATE_MAGIC) {
+		PROPAGATE(kstate_paddr, ks_paddr);
+		PROPAGATE(uart_data_reg, NS16550_UART);
+		PROPAGATE(uart_status_reg, NS16550_UART + NS16550_LSR);
+	}
+
 	return entry;
 }
