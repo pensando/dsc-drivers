@@ -8,12 +8,6 @@
 #include "req_int.h"
 #include "notify.h"
 
-#define NOTIFY_EN               PXB_(CFG_TGT_NOTIFY_EN)
-#define NOTIFY_RING_SIZE        PXB_(CFG_TGT_REQ_NOTIFY_RING_SIZE)
-
-#define NOTIFY_BASE             PXB_(DHS_TGT_NOTIFY)
-#define NOTIFY_STRIDE           4
-
 static u_int64_t
 notify_addr(const int port)
 {
@@ -23,7 +17,7 @@ notify_addr(const int port)
 static u_int64_t
 notify_int_addr(void)
 {
-    return PXB_(CFG_TGT_REQ_NOTIFY_INT);
+    return NOTIFY_INT_ADDR;
 }
 
 static void
@@ -73,7 +67,7 @@ notify_set_enable(const u_int32_t mask)
 {
     union {
         struct {
-            u_int32_t msg:1;
+            u_int32_t msg:1; // 0
             u_int32_t pmv:1;
             u_int32_t db_pmv:1;
             u_int32_t unsupp:1;
@@ -83,7 +77,11 @@ notify_set_enable(const u_int32_t mask)
             u_int32_t prt_invalid:1;
             u_int32_t rc_vfid_miss:1;
             u_int32_t prt_oor:1;
-            u_int32_t vfid_oor:1;
+            u_int32_t vfid_oor:1; // 10
+/* SALINA-TODO move struct to asic specific */
+#ifdef ASIC_SALINA
+            u_int32_t ide_t_fail:1;
+#endif
             u_int32_t cfg_bdf_oor:1;
             u_int32_t pmr_ecc_err:1;
             u_int32_t prt_ecc_err:1;
@@ -184,7 +182,7 @@ pciehw_notify_intr_init(const int port, u_int64_t msgaddr, u_int32_t msgdata)
 {
     notify_enable();
     return req_int_init(notify_int_addr(), port,
-                        msgaddr, msgdata | MSGDATA_ADD_PORT);
+                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
 }
 
 static int
@@ -254,7 +252,8 @@ pciehw_notify_poll_init(const int port)
     const u_int32_t msgdata = 1;
 
     notify_enable();
-    return req_int_init(notify_int_addr(), port, msgaddr, msgdata);
+    return req_int_init(notify_int_addr(), port, msgaddr, MADDR_ADD_PORT,
+                        msgdata, MDATA_AS_IS);
 }
 
 int

@@ -135,6 +135,7 @@ pciesvc_init(pciesvc_params_t *params)
     lp = params_to_lparams(params);
     if (lp == NULL) goto err_out;
 
+    pciehw_indirect_global_init(lp->port);
     if (lp->ind_poll) {
         if ((r = pciesvc_indirect_poll_init(lp->port)) < 0) {
             pciesvc_loglocal("indirect_poll_init failed: %d\n", r);

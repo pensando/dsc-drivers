@@ -297,6 +297,27 @@ cfgspace_write(cfgspace_t *cs,
     return 0;
 }
 
+void
+cfgspace_setb(cfgspace_t *cs, const u_int16_t offset, const u_int8_t val)
+{
+    if (offset < cfgspace_size(cs)) {
+        cfgspace_setb_cur(cs, offset, val);
+    }
+}
+void
+cfgspace_setw(cfgspace_t *cs, const u_int16_t offset, const u_int16_t val)
+{
+    if (offset + 1 < cfgspace_size(cs)) {
+        cfgspace_setw_cur(cs, offset, val);
+    }
+}
+void cfgspace_setd(cfgspace_t *cs, const u_int16_t offset, const u_int32_t val)
+{
+    if (offset + 3 < cfgspace_size(cs)) {
+        cfgspace_setd_cur(cs, offset, val);
+    }
+}
+
 /*****************************************************************/
 
 u_int16_t

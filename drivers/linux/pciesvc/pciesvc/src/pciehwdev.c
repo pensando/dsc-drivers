@@ -9,13 +9,10 @@
 u_int16_t
 pciehwdev_get_hostbdf(const pciehwdev_t *phwdev)
 {
-    pciehw_port_t *p;
     u_int8_t secbus;
     u_int16_t bdf;
 
-    p = pciesvc_port_get(phwdev->port);
-    secbus = p->secbus;
-    pciesvc_port_put(p, CLEAN);
+    portcfg_read_bus(phwdev->port, NULL, &secbus, NULL);
 
     /*
      * If we have a parent then map our local bdf based on root secbus,

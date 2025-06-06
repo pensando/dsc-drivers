@@ -31,6 +31,7 @@ typedef struct pciesvc_memrw_notify_s {
     u_int32_t size;             /* i/o size */
     u_int64_t localpa;          /* local physical address */
     u_int64_t data;             /* data, if write */
+    u_int64_t opaque;           /* opaque cookie */
 } pciesvc_memrw_notify_t;
 
 typedef struct pciesvc_sriov_numvfs_s {
@@ -62,6 +63,10 @@ typedef struct pciesvc_logmsg_s {
     char msg[80];               /* log string, NULL-terminated */
 } pciesvc_logmsg_t;
 
+typedef struct pciesvc_mgmtchg_s {
+    uint32_t bus;
+} pciesvc_mgmtchg_t;
+
 typedef struct pciesvc_eventdata_s {
     pciesvc_event_t evtype;     /* PCIESVC_EV_* */
     u_int8_t port;              /* PCIe port */
@@ -71,6 +76,7 @@ typedef struct pciesvc_eventdata_s {
         pciesvc_sriov_numvfs_t sriov_numvfs;    /* EV_SRIOV_NUMVFS */
         pciesvc_reset_t reset;                  /* EV_RESET */
         pciesvc_logmsg_t logmsg;                /* EV_LOGMSG */
+        pciesvc_mgmtchg_t mgmtchg;              /* EV_MGMTCHG */
     };
 } pciesvc_eventdata_t;
 

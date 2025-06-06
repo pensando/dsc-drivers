@@ -13,8 +13,24 @@ extern "C" {
 #endif
 #endif
 
-#define PCIEHW_NPORTS   8
+#ifdef RTOS
+#define PCIEHW_NPORTS       CONFIG_PCIEHW_NPORTS
+#define PCIEHW_NDEVS        CONFIG_PCIEHW_NDEVS
+#define PCIEHW_NDEVS_HI     CONFIG_PCIEHW_NDEVS_HI
+#define PCIEHW_NOTIFY_NUM   CONFIG_PCIEHW_NOTIFY_NUM
+#else
+#define PCIEHW_NPORTS       8
+#define PCIEHW_NOTIFY_NUM   PCIEHW_NPORTS
+/*
+#ifdef SALINA
+#define PCIEHW_NDEVS    4150
+#define PCIEHW_NDEVS_HI 4150
+#else
+*/
 #define PCIEHW_NDEVS    1024
+#define PCIEHW_NDEVS_HI 2080
+/* #endif */
+#endif
 #define PCIEHW_CFGSHIFT 11
 #define PCIEHW_CFGSZ    (1 << PCIEHW_CFGSHIFT)
 #define PCIEHW_NROMSK   128

@@ -8,10 +8,6 @@
 #include "req_int.h"
 #include "indirect.h"
 
-#define IND_INFO_BASE   PXB_(STA_TGT_IND_INFO)
-#define IND_INFO_NWORDS 1
-#define IND_INFO_STRIDE 4
-
 static u_int64_t
 ind_info_addr(const int port)
 {
@@ -21,22 +17,128 @@ ind_info_addr(const int port)
 static u_int64_t
 indirect_int_addr(void)
 {
-    return PXB_(CFG_TGT_REQ_INDIRECT_INT);
+    return IND_INT_ADDR;
 }
+
+/*****************************************************************
+ * indirect timer support
+ *
+ * sta_tgt_free_running_time_val:  free running count once we enable via
+ *                                 cfg_tgt_ind_debug_rsp_enable
+ * sta_tgt_ind_debug_rsp_pnd_time: This is the latched time when indirect
+ *                                 started (start time)
+ * sta_tgt_ind_debug_rsp_err_time: when error is crossed,
+ *                                 it will store end time
+ */
+
+static uint32_t
+indirect_timer_get_ticks(void)
+{
+#ifdef ASIC_SALINA
+    return pciesvc_reg_rd32(PXBT_(STA_TGT_FREE_RUNNING));
+#else
+    return 0;
+#endif
+}
+
+static uint32_t
+indirect_timer_delta_from_now(const uint32_t ticks, const uint32_t now)
+{
+    if (now < ticks) {
+        /* account for timer wrap */
+        return (0x100000000ULL - ticks) + now;
+    }
+    return now - ticks;
+}
+
+static void
+indirect_timer_get_rsp(uint32_t *pnd_time, uint32_t *err_time)
+{
+#ifdef ASIC_SALINA
+    union {
+        struct {
+            uint32_t pnd_time;
+            uint32_t err_time:16;
+        } __attribute__((packed));
+        uint32_t w[2];
+    } sta_ind_debug_rsp;
+
+    pciesvc_reg_rd32w(PXBT_(STA_TGT_IND_DEBUG_RSP), sta_ind_debug_rsp.w, 2);
+    if (pnd_time) *pnd_time = sta_ind_debug_rsp.pnd_time;
+    if (err_time) *err_time = sta_ind_debug_rsp.err_time;
+#endif
+}
+
+#define CLOCK_FREQ      1100000000
+#define IND_THRESHOLD   10000
+#define ERR_UNIT        0
+#define ERR_TM_UNIT_TO_TICKS(e) ((e) * 1024 * (1 << (ERR_UNIT * 2)))
+/*
+ * core clock frequency 11000000 MHz
+ * one core clock cycle is 1 / 1100000000s, or 1 / 1100.000000us
+ *
+ * ticks to us:
+ *     ticks to us: us = ticks * (1 / 1100.000000)
+ *     ticks to us: us = ticks / 1100
+ * us to ticks
+ *     us to ticks: ticks = us / ( 1 / 1100)
+ *     us to ticks: ticks = us * 1100
+ */
+uint32_t
+pciehw_indirect_ticks_to_us(uint32_t ticks)
+{
+    return ticks / (CLOCK_FREQ / 1000000);
+}
+
+#ifdef ASIC_SALINA
+static inline uint32_t
+us_to_ticks(uint32_t usecs)
+{
+    return usecs * (CLOCK_FREQ/ 1000000);
+}
+
+/*
+ * threshold - threshold that is allowed,
+ *             once crosses HW will trigger interrupt,
+ *              pxb_tgt_int_err_intreg.
+ *                      tgt_indirect_rsp_cross_threshold_interrupt
+ *             unit of 4k cycles, (reset_val=0x2FAF, size=20)
+ * err_unit - clock unit for capturing sta_tgt_ind_debug_rsp err_time,
+ *              0:  1k cycles, (reset_val=0, size=2)
+ *              1 : 4k cycles,
+ *              2 : 16k cycles,
+ *              3 : 64k cycles",
+ * tgt_port - select debug port, port values 0..7 (reset_val=0, size=3)
+ * enable - enable indirect debug (reset_val=0, size=1)
+ *              0 : disable,
+ *              1 : enable",
+ */
+static void
+indirect_timer_init(const int port)
+{
+    union {
+        struct {
+            uint32_t threshold:20;
+            uint32_t err_unit:2;
+            uint32_t tgt_port:3;
+            uint32_t enable:1;
+        } __attribute__((packed));
+        uint32_t w;
+    } cfg_ind_debug_rsp;
+    const uint32_t threshold = us_to_ticks(IND_THRESHOLD) >> 12;
+
+    cfg_ind_debug_rsp.w = pciesvc_reg_rd32(PXBT_(CFG_TGT_IND_DEBUG_RSP));
+    cfg_ind_debug_rsp.tgt_port = port;
+    cfg_ind_debug_rsp.threshold = threshold;
+    cfg_ind_debug_rsp.enable = 1;
+    cfg_ind_debug_rsp.err_unit = ERR_UNIT;
+    pciesvc_reg_wr32(PXBT_(CFG_TGT_IND_DEBUG_RSP), cfg_ind_debug_rsp.w);
+}
+#endif
 
 /*****************************************************************
  * aximst rams
  */
-#define AXIMST_BASE     PXB_(DHS_TGT_AXIMST0)
-#define AXIMST_STRIDE   \
-    (ASIC_(PXB_CSR_DHS_TGT_AXIMST1_BYTE_ADDRESS) - \
-     ASIC_(PXB_CSR_DHS_TGT_AXIMST0_BYTE_ADDRESS))
-
-#define AXIMST_NWORDS           4
-#define AXIMST_ENTRY_STRIDE     32
-#define AXIMST_ENTRIES_PER_PORT 16
-#define AXIMST_PORTS_PER_ROW    8
-#define AXIMST_PORT_STRIDE      (AXIMST_ENTRY_STRIDE * AXIMST_ENTRIES_PER_PORT)
 
 static u_int64_t
 aximst_addr(const unsigned int port,
@@ -122,7 +224,7 @@ read_indirect_info(const unsigned int port,
     u_int8_t *bp;
     int i;
 
-    for (bp = buf, i = 0; i < 5; i++, bp += 16) {
+    for (bp = buf, i = 0; i < 5; i++, bp += AXIS_INFO_BYTE_COUNT) {
         read_aximst(port, i, entry, (u_int32_t *)bp);
     }
 }
@@ -132,7 +234,7 @@ read_indirect_entry(const unsigned int port,
                     const unsigned int entry,
                     indirect_entry_t *ientry)
 {
-    u_int8_t buf[80];
+    u_int8_t buf[128];
 
     read_indirect_info(port, entry, buf);
     decode_indirect_info(buf, ientry);
@@ -153,8 +255,6 @@ read_pending_indirect_entry(const unsigned int port,
 void
 pciehw_indirect_complete(indirect_entry_t *ientry)
 {
-#define IND_RSP_ADDR    PXB_(DHS_TGT_IND_RSP_ENTRY)
-#define IND_RSP_NWORDS  5
     union {
         struct {
             u_int32_t data0;
@@ -202,6 +302,31 @@ pciehw_indirect_complete(indirect_entry_t *ientry)
     ind_rsp.fetch_rsp = 0;
 
     pciesvc_reg_wr32w(IND_RSP_ADDR, ind_rsp.w, IND_RSP_NWORDS);
+
+#ifdef ASIC_SALINA
+    if (ientry->pndtm) {
+        const uint32_t now = indirect_timer_get_ticks();
+        const uint32_t pnd_tm = ientry->pndtm;
+        const uint32_t svc_tm =
+            indirect_timer_delta_from_now(ientry->svc_start_tm, now);
+        pciehw_port_t *p = pciesvc_port_get(ientry->port);
+        uint32_t err_tm = 0;
+
+        if (pnd_tm > p->stats.ind_rsp_pndmax)
+            p->stats.ind_rsp_pndmax = pnd_tm;
+        if (svc_tm > p->stats.ind_rsp_svcmax)
+            p->stats.ind_rsp_svcmax = svc_tm;
+        if ((pnd_tm + svc_tm) > us_to_ticks(IND_THRESHOLD)) {
+            pciesvc_get_timestamp(&p->indtr_ring[p->indtr_idx].ts);
+            p->indtr_ring[p->indtr_idx].pnd_tm = pnd_tm;
+            p->indtr_ring[p->indtr_idx].svc_tm = svc_tm;
+            indirect_timer_get_rsp(NULL, &err_tm);
+            p->indtr_ring[p->indtr_idx].err_tm = ERR_TM_UNIT_TO_TICKS(err_tm);
+            p->indtr_idx++;
+            if (p->indtr_idx >= PCIEHW_NINDTR) p->indtr_idx = 0;
+        }
+    }
+#endif
 
     ientry->completed = 1;
 }
@@ -264,11 +389,23 @@ handle_indirect(const int port, pciehw_port_t *p, indirect_entry_t *ientry)
  */
 
 int
+pciehw_indirect_global_init(const int active_port)
+{
+#ifdef ASIC_SALINA
+    pciehw_port_t *p = pciesvc_port_get(active_port);
+
+    p->indtimer = 1;    /* indirect timer enabled for this port */
+    indirect_timer_init(active_port);
+#endif
+    return 0;
+}
+
+int
 pciehw_indirect_intr_init(const int port,
                           const u_int64_t msgaddr, const u_int32_t msgdata)
 {
     return req_int_init(indirect_int_addr(), port,
-                        msgaddr, msgdata | MSGDATA_ADD_PORT);
+                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
 }
 
 static int
@@ -281,6 +418,15 @@ pciehw_indirect_handle(const int port, const int polled)
 
     pciesvc_memset(ientry, 0, sizeof(*ientry));
     pending = read_pending_indirect_entry(port, ientry);
+
+    if (p->indtimer) {
+        uint32_t quetm;
+        const uint32_t now = indirect_timer_get_ticks();
+
+        indirect_timer_get_rsp(&quetm, NULL);
+        ientry->pndtm = indirect_timer_delta_from_now(quetm, now);
+        ientry->svc_start_tm = now;
+    }
 
     p->stats.ind_intr++;
     if (polled) p->stats.ind_polled++;
@@ -314,7 +460,8 @@ pciehw_indirect_poll_init(const int port)
     const u_int64_t msgaddr = pciesvc_indirect_intr_dest_pa(port);
     const u_int32_t msgdata = 1;
 
-    return req_int_init(indirect_int_addr(), port, msgaddr, msgdata);
+    return req_int_init(indirect_int_addr(), port, msgaddr, MADDR_ADD_PORT,
+                        msgdata, MDATA_AS_IS);
 }
 
 int

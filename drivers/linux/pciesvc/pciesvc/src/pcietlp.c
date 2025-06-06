@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2018,2021-2022, Pensando Systems Inc.
+ * Copyright (c) 2024, Advanced Micro Devices Inc.
  */
 
 #include "pciesvc_impl.h"
 #include "pcietlp.h"
 #include "bdf.h"
+
+#define TLP_DATAPTR(_tlp, _offset) \
+    ((u_int32_t *)((u_int8_t *)(_tlp) + (_offset)))
 
 typedef struct pcietlp_info_s {
     unsigned int error:1;
@@ -293,7 +297,7 @@ encode_mem32_hdr(const pcie_stlp_t *stlp, const u_int8_t type, void *rtlp)
     pcie_tlp_mem32_t *mem = rtlp;
 
     encode_cmn_hdr(stlp, type, mem);
-    encode_addr32(stlp, &mem->addr);
+    encode_addr32(stlp, &mem->dw[2]);
 }
 
 static void
@@ -302,7 +306,7 @@ decode_mem32_hdr(pcie_stlp_t *stlp, const void *rtlp)
     const pcie_tlp_mem32_t *mem = rtlp;
 
     decode_cmn_hdr(stlp, mem);
-    decode_addr32(stlp, mem->addr);
+    decode_addr32(stlp, mem->dw[2]);
 }
 
 /******************************************************************/
@@ -313,7 +317,7 @@ encode_mem64_hdr(const pcie_stlp_t *stlp, const u_int8_t type, void *rtlp)
     pcie_tlp_mem64_t *mem = rtlp;
 
     encode_cmn_hdr(stlp, type, mem);
-    encode_addr64(stlp, &mem->addr_hi);
+    encode_addr64(stlp, &mem->dw[2]);
 }
 
 static void
@@ -322,7 +326,7 @@ decode_mem64_hdr(pcie_stlp_t *stlp, const void *rtlp)
     const pcie_tlp_mem64_t *mem = rtlp;
 
     decode_cmn_hdr(stlp, mem);
-    decode_addr64(stlp, &mem->addr_hi);
+    decode_addr64(stlp, &mem->dw[2]);
 }
 
 /******************************************************************
@@ -373,7 +377,7 @@ encode_cfgwr(const pcie_stlp_t *stlp, void *rtlp, const size_t rtlpsz)
     }
 
     encode_cfg_hdr(stlp, PCIE_TLP_TYPE_CFGWR0, rtlp);
-    encode_data32(stlp, rtlp + 12);
+    encode_data32(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 
@@ -388,7 +392,7 @@ decode_cfgwr(pcie_stlp_t *stlp, const void *rtlp, const size_t rtlpsz)
     }
 
     decode_cfg_hdr(stlp, rtlp);
-    decode_data32(stlp, rtlp + 12);
+    decode_data32(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 
@@ -407,7 +411,7 @@ encode_memrd(const pcie_stlp_t *stlp, void *rtlp, const size_t rtlpsz)
     }
 
     encode_mem32_hdr(stlp, PCIE_TLP_TYPE_MEMRD, rtlp);
-    encode_data(stlp, rtlp + 12);
+    encode_data(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 
@@ -442,7 +446,7 @@ encode_memwr(const pcie_stlp_t *stlp, void *rtlp, const size_t rtlpsz)
     }
 
     encode_mem32_hdr(stlp, PCIE_TLP_TYPE_MEMWR, rtlp);
-    encode_data(stlp, rtlp + 12);
+    encode_data(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 
@@ -463,7 +467,7 @@ decode_memwr(pcie_stlp_t *stlp, const void *rtlp, const size_t rtlpsz)
                                  tlpsz + stlp->size, rtlpsz);
     }
 
-    decode_data(stlp, rtlp + 12);
+    decode_data(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz + stlp->size;
 }
 
@@ -516,7 +520,7 @@ encode_memwr64(const pcie_stlp_t *stlp, void *rtlp, const size_t rtlpsz)
     }
 
     encode_mem64_hdr(stlp, PCIE_TLP_TYPE_MEMWR64, rtlp);
-    encode_data(stlp, rtlp + 16);
+    encode_data(stlp, TLP_DATAPTR(rtlp, 16));
     return tlpsz;
 }
 
@@ -537,7 +541,7 @@ decode_memwr64(pcie_stlp_t *stlp, const void *rtlp, const size_t rtlpsz)
                                  tlpsz + stlp->size, rtlpsz);
     }
 
-    decode_data(stlp, rtlp + 16);
+    decode_data(stlp, TLP_DATAPTR(rtlp, 16));
     return tlpsz + stlp->size;
 }
 
@@ -592,7 +596,7 @@ encode_iowr(const pcie_stlp_t *stlp, void *rtlp, const size_t rtlpsz)
     }
 
     encode_mem32_hdr(stlp, PCIE_TLP_TYPE_IOWR, rtlp);
-    encode_data(stlp, rtlp + 12);
+    encode_data(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 
@@ -607,7 +611,7 @@ decode_iowr(pcie_stlp_t *stlp, const void *rtlp, const size_t rtlpsz)
     }
 
     decode_mem32_hdr(stlp, rtlp);
-    decode_data(stlp, rtlp + 12);
+    decode_data(stlp, TLP_DATAPTR(rtlp, 12));
     return tlpsz;
 }
 

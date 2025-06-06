@@ -14,14 +14,20 @@
 #define MSGDATA_HAS_ADD_PORT(m) (((m) & MSGDATA_ADD_PORT) != 0)
 #define MSGDATA_DATA(m)         ((m) & ~MSGDATA_ADD_PORT)
 
-void
-req_int_set(const u_int64_t reg, const u_int64_t addr, const u_int32_t data);
+typedef enum {
+    MADDR_AS_IS,
+    MADDR_ADD_PORT
+} addr_mode_t;
 
-void
-req_int_get(const u_int64_t reg, u_int64_t *addrp, u_int32_t *datap);
+typedef enum {
+    MDATA_AS_IS,
+    MDATA_ADD_PORT,
+    MDATA_FIXED
+} data_mode_t;
 
 int
 req_int_init(const u_int64_t reg,
-             const int port, u_int64_t msgaddr, u_int32_t msgdata);
+             const int port, u_int64_t msgaddr, addr_mode_t addr_mode,
+             u_int32_t msgdata, data_mode_t data_mode);
 
 #endif /* __REQ_INT_H__ */

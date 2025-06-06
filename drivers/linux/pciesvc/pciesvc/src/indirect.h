@@ -8,6 +8,7 @@
 
 #include "indirect_entry.h"
 
+int pciehw_indirect_global_init(const int port);
 int pciehw_indirect_poll_init(const int port);
 int pciehw_indirect_poll(const int port);
 int pciehw_indirect_intr_init(const int port,
@@ -15,5 +16,6 @@ int pciehw_indirect_intr_init(const int port,
 int pciehw_indirect_intr(const int port);
 
 void pciehw_indirect_complete(indirect_entry_t *ientry);
+uint32_t pciehw_indirect_ticks_to_us(uint32_t ticks);
 
 #endif /* __INDIRECT_H__ */

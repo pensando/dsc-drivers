@@ -6,51 +6,27 @@
 #include "pciesvc_impl.h"
 #include "intrutils.h"
 
-#define INTR_BASE               ASIC_(ADDR_BASE_INTR_INTR_OFFSET)
-#define INTR_COUNT              ASIC_(INTR_CSR_DHS_INTR_ASSERT_ENTRY_ARRAY_COUNT)
-
-#define INTR_MSIXCFG_OFFSET     ASIC_(INTR_CSR_DHS_INTR_MSIXCFG_BYTE_OFFSET)
-#define INTR_MSIXCFG_BASE       (INTR_BASE + INTR_MSIXCFG_OFFSET)
-#define INTR_MSIXCFG_STRIDE     0x10
-
-#define INTR_FWCFG_OFFSET       ASIC_(INTR_CSR_DHS_INTR_FWCFG_BYTE_OFFSET)
-#define INTR_FWCFG_BASE         (INTR_BASE + INTR_FWCFG_OFFSET)
-#define INTR_FWCFG_STRIDE       0x8
-
-#define INTR_DRVCFG_OFFSET      ASIC_(INTR_CSR_DHS_INTR_DRVCFG_BYTE_OFFSET)
-#define INTR_DRVCFG_BASE        (INTR_BASE + INTR_DRVCFG_OFFSET)
-#define INTR_DRVCFG_STRIDE      0x20
-
-#define INTR_ASSERT_OFFSET      ASIC_(INTR_CSR_DHS_INTR_ASSERT_BYTE_OFFSET)
-#define INTR_ASSERT_BASE        (INTR_BASE + INTR_ASSERT_OFFSET)
-#define INTR_ASSERT_STRIDE      0x4
-#define INTR_ASSERT_DATA        0x00000001 /* in little-endian */
-
-#define INTR_STATE_OFFSET       ASIC_(INTR_CSR_DHS_INTR_STATE_BYTE_OFFSET)
-#define INTR_STATE_BASE         (INTR_BASE + INTR_STATE_OFFSET)
-#define INTR_STATE_STRIDE       0x10
-
 #define NWORDS(a)               (sizeof(a) / sizeof(u_int32_t))
 
 static u_int64_t
 intr_msixcfg_addr(const int intrb)
 {
     pciesvc_assert(intrb < INTR_COUNT);
-    return INTR_MSIXCFG_BASE + (intrb * INTR_MSIXCFG_STRIDE);
+    return INTR_MSIXCFG_BASE(intrb) + (intrb * INTR_MSIXCFG_STRIDE);
 }
 
 static u_int64_t
 intr_fwcfg_addr(const int intrb)
 {
     pciesvc_assert(intrb < INTR_COUNT);
-    return INTR_FWCFG_BASE + (intrb * INTR_FWCFG_STRIDE);
+    return INTR_FWCFG_BASE(intrb) + (intrb * INTR_FWCFG_STRIDE);
 }
 
 static u_int64_t
 intr_drvcfg_addr(const int intrb)
 {
     pciesvc_assert(intrb < INTR_COUNT);
-    return INTR_DRVCFG_BASE + (intrb * INTR_DRVCFG_STRIDE);
+    return INTR_DRVCFG_BASE(intrb) + (intrb * INTR_DRVCFG_STRIDE);
 }
 
 /*
@@ -93,7 +69,7 @@ static u_int64_t
 intr_assert_addr(const int intr)
 {
     pciesvc_assert(intr < INTR_COUNT);
-    return INTR_ASSERT_BASE + (intr * INTR_ASSERT_STRIDE);
+    return INTR_ASSERT_BASE(intr) + (intr * INTR_ASSERT_STRIDE);
 }
 
 static u_int32_t
@@ -158,7 +134,7 @@ intr_fwcfg_mode(const int intr, const int legacy, const int fmask)
  * to the register to X - X = 0.  This works even for negative values
  * since (-X) - (-X) = 0.
  */
-static void
+u_int32_t
 intr_pba_clear(const int intr)
 {
     const u_int64_t pa = intr_drvcfg_addr(intr);
@@ -168,12 +144,13 @@ intr_pba_clear(const int intr)
     if (credits) {
         pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, int_credits), credits);
     }
+    return credits;
 }
 
 void
 intr_deassert(const int intr)
 {
-    intr_pba_clear(intr);
+    (void)intr_pba_clear(intr);
 }
 
 /*****************

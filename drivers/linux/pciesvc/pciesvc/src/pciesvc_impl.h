@@ -41,8 +41,10 @@ void pciehw_cfg_reset(pciehwdev_t *phwdev, const pciesvc_rsttype_t rsttype);
 u_int64_t pciehw_bar_getsize(pciehwbar_t *phwbar);
 void pciehw_bar_setaddr(pciehwbar_t *phwbar, const u_int64_t addr);
 void pciehw_bar_load(pciehwdev_t *phwdev, pciehwbar_t *phwbar);
+void pciehw_bar_unload(pciehwdev_t *phwdev, pciehwbar_t *phwbar);
 void pciehw_bar_enable(pciehwdev_t *phwdev, pciehwbar_t *phwbar, const int on);
 
+void pciehw_mgmtchg_event(pciehwdev_t *phwdev);
 u_int16_t pciehwdev_get_hostbdf(const pciehwdev_t *phwdev);
 
 #define CLEAN                   0
@@ -94,8 +96,9 @@ pciesvc_indirect_intr_dest_pa(const int port)
     pciesvc_assert(port >= 0 && port < PCIEHW_NPORTS);
     if (intr_dest_pa[port] == 0) {
         pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+        pciehw_shmem_t *pshmem = pciesvc_shmem_get();
         intr_dest_pa[port] =
-            pciesvc_vtop(&phwmem->indirect_intr_dest[port]);
+            pciesvc_vtop(PHWMEM_ADDR_FIELD(phwmem, pshmem, indirect_intr_dest[port]));
     }
     return intr_dest_pa[port];
 }
@@ -108,8 +111,9 @@ pciesvc_notify_intr_dest_pa(const int port)
     pciesvc_assert(port >= 0 && port < PCIEHW_NPORTS);
     if (intr_dest_pa[port] == 0) {
         pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+        pciehw_shmem_t *pshmem = pciesvc_shmem_get();
         intr_dest_pa[port] =
-            pciesvc_vtop(&phwmem->notify_intr_dest[port]);
+            pciesvc_vtop(PHWMEM_ADDR_FIELD(phwmem, pshmem, notify_intr_dest[port]));
     }
     return intr_dest_pa[port];
 }
@@ -121,7 +125,8 @@ pciesvc_cfgcur_pa(void)
 
     if (cfgcur_pa == 0) {
         pciehw_mem_t *phwmem = pciesvc_hwmem_get();
-        cfgcur_pa = pciesvc_vtop(phwmem->cfgcur);
+        pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+        cfgcur_pa = pciesvc_vtop(PHWMEM_DATA_FIELD(phwmem, pshmem, cfgcur));
     }
     return cfgcur_pa;
 }
@@ -133,18 +138,65 @@ pciesvc_notify_ring_mask(const int port)
 
     if (ring_mask == 0) {
         pciehw_shmem_t *pshmem = pciesvc_shmem_get();
-        ring_mask = pshmem->notify_ring_mask;
+        ring_mask = PSHMEM_DATA_FIELD(pshmem, notify_ring_mask);
     }
     return ring_mask;
 }
+
+#ifdef SIM
+typedef struct notify_sim_ctx {
+    int valid;
+    notify_entry_t notify_entry;
+} notify_sim_ctx_t;
+
+static notify_sim_ctx_t notify_sim_ctx;
 
 static inline notify_entry_t *
 pciesvc_notify_ring_get(const int port, const int idx)
 {
     pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
     notify_entry_t *notify_ring;
+    notify_sim_ctx_t *notctx = &notify_sim_ctx;
 
-    notify_ring = (notify_entry_t *)phwmem->notify_area[port];
+    pciesvc_assert(!notctx->valid);
+    notctx->valid = 1;
+
+    notify_ring = (notify_entry_t *)PHWMEM_ADDR_FIELD(phwmem, pshmem,
+                                                      notify_area[port]);
+    pal_mem_rd(pal_mem_vtop(&notify_ring[idx]), &notctx->notify_entry,
+               sizeof(notctx->notify_entry), 0);
+    return &notctx->notify_entry;
+}
+
+static inline void
+pciesvc_notify_ring_put(const notify_entry_t *nentry)
+{
+    notify_sim_ctx_t *notctx = &notify_sim_ctx;
+
+    pciesvc_assert(notctx->valid);
+    notctx->valid = 0;
+}
+
+#else
+
+static inline notify_entry_t *
+pciesvc_notify_ring_get(const int port, const int idx)
+{
+    pciehw_mem_t *phwmem = pciesvc_hwmem_get();
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+    notify_entry_t *notify_ring;
+#ifdef ASIC_SALINA
+    int32_t notify_idx;
+
+    notify_idx = PSHMEM_DATA_FIELD(pshmem, notify_port[port]);
+    pciesvc_assert(notify_idx != -1);
+    notify_ring = (notify_entry_t *)PHWMEM_ADDR_FIELD(phwmem, pshmem,
+                                                      notify_area[notify_idx]);
+#else
+    notify_ring = (notify_entry_t *)PHWMEM_ADDR_FIELD(phwmem, pshmem,
+                                                      notify_area[port]);
+#endif
     return &notify_ring[idx];
 }
 
@@ -154,13 +206,15 @@ pciesvc_notify_ring_put(const notify_entry_t *nentry)
     /* nop */
 }
 
+#endif
+
 static inline pciehw_port_t *
 pciesvc_port_get(const int port)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
 
     pciesvc_assert(port >= 0 && port <= PCIEHW_NPORTS);
-    return &pshmem->port[port];
+    return PSHMEM_ADDR_FIELD(pshmem, port[port]);
 }
 
 static inline void
@@ -173,30 +227,14 @@ static inline pciehwdev_t *
 pciesvc_dev_get(const pciehwdevh_t hwdevh)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+    int ndevs = PSHMEM_NDEVS(pshmem);
 
-    return hwdevh > 0 && hwdevh < PCIEHW_NDEVS ? &pshmem->dev[hwdevh] : NULL;
+    return hwdevh > 0 &&
+        hwdevh < ndevs ? PSHMEM_ADDR_FIELD(pshmem, dev[hwdevh]) : NULL;
 }
 
 static inline void
 pciesvc_dev_put(const pciehwdev_t *phwdev, const int dirty)
-{
-    /* nop */
-}
-
-static inline void
-pciesvc_cfgspace_get(const pciehwdevh_t hwdevh, cfgspace_t *cs)
-{
-    pciehw_mem_t *phwmem = pciesvc_hwmem_get();
-    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
-
-    cs->cur = phwmem->cfgcur[hwdevh];
-    cs->msk = pshmem->cfgmsk[hwdevh];
-    cs->rst = pshmem->cfgrst[hwdevh];
-    cs->size = PCIEHW_CFGSZ;
-}
-
-static inline void
-pciesvc_cfgspace_put(const cfgspace_t *cs, const int dirty)
 {
     /* nop */
 }
@@ -206,7 +244,7 @@ pciesvc_spmt_get(const int idx)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
 
-    return &pshmem->spmt[idx];
+    return PSHMEM_ADDR_FIELD(pshmem, spmt[idx]);
 }
 
 static inline void
@@ -220,7 +258,7 @@ pciesvc_sprt_get(const int idx)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
 
-    return &pshmem->sprt[idx];
+    return PSHMEM_ADDR_FIELD(pshmem, sprt[idx]);
 }
 
 static inline void
@@ -234,7 +272,7 @@ pciesvc_vpd_get(const pciehwdevh_t hwdevh)
 {
     pciehw_shmem_t *pshmem = pciesvc_shmem_get();
 
-    return &pshmem->vpddata[hwdevh];
+    return PSHMEM_ADDR_FIELD(pshmem, vpddata[hwdevh]);
 }
 
 static inline void
@@ -273,6 +311,15 @@ pciehwdev_get_name(const pciehwdev_t *phwdev)
     return phwdev->name;
 }
 
+static inline int
+pciehwdev_get_intrb(const pciehwdev_t *phwdev)
+{
+    if (phwdev->novrdintr) {
+        return phwdev->ovrdintr[0].intrb;
+    }
+    return phwdev->intrb;
+}
+
 static inline pciehwdev_t *
 pciehwdev_vfdev_get(const pciehwdev_t *phwdev, const int vfidx)
 {
@@ -302,6 +349,12 @@ static inline u_int64_t
 rounddn_power2(u_int64_t n)
 {
     return roundup_power2(n + 1) >> 1;
+}
+
+static inline u_int64_t
+align_to(u_int64_t n, u_int64_t align)
+{
+	return (n + align - 1) & ~(align - 1);
 }
 
 #ifdef __cplusplus

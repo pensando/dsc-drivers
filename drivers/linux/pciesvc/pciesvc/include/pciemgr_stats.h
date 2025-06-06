@@ -16,7 +16,7 @@ extern "C" {
 typedef union pciemgr_stats {
     struct {
 
-#define PCIEMGR_STATS_DEF(S) \
+#define PCIEMGR_STATS_DEF(S, D) \
         uint64_t S;
 #include "pciemgr_stats_defs.h"
 

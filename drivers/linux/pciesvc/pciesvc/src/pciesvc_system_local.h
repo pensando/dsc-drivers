@@ -10,18 +10,24 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stddef.h>
+#ifndef __USE_MISC
+#define __USE_MISC
+#endif
 #include <unistd.h>
+#ifndef __USE_GNU
 #define __USE_GNU
+#endif
 #include <string.h>
 #include <inttypes.h>
 #include <assert.h>
 #include <endian.h>
+#include <time.h>
 #include <sys/param.h>
 #include <linux/pci_regs.h>
 
 #include "platform/pal/include/pal.h"
-#include "platform/pciemgr/include/pciemgr.h"
-#include "platform/pciesvc/include/pciesvc.h"
+#include "pciemgr/include/pciemgr.h"
+#include "pciesvc/include/pciesvc.h"
 
 #define pciesvc_shmem_get       pciehw_get_shmem
 #define pciesvc_hwmem_get       pciehw_get_hwmem
@@ -32,6 +38,7 @@
 #define pciesvc_pciepreg_wr32   pal_pciepreg_wr32
 #define pciesvc_mem_barrier     PAL_barrier
 #define pciesvc_memset          memset
+#define pciesvc_memcmp          memcmp
 #define pciesvc_memcpy          memcpy
 #define pciesvc_memcpy_toio     memcpy
 #define pciesvc_assert          assert
@@ -79,62 +86,13 @@ typedef union {
 static inline int
 pciesvc_mem_rd(const uint64_t pa, void *buf, const size_t sz)
 {
-    uint64_t pa_aligned;
-    uint8_t idx;
-    iodata_t v;
-
-    switch (sz) {
-    case 1:
-        pa_aligned = pa & ~0x3;
-        idx = pa & 0x3;
-        v.l = pal_reg_rd32(pa_aligned);
-        *(uint8_t *)buf = v.b[idx];
-        break;
-    case 2:
-        pa_aligned = pa & ~0x3;
-        idx = (pa & 0x3) >> 1;
-        v.l = pal_reg_rd32(pa_aligned);
-        *(uint16_t *)buf = v.h[idx];
-        break;
-    case 4:
-    case 8:
-        pal_reg_rd32w(pa, (uint32_t *)buf, sz >> 2);
-        break;
-    default:
-        return -1;
-    }
-    return 0;
+    return pal_mem_rd(pa, (uint32_t *)buf, sz, 0);
 }
 
 static inline void
 pciesvc_mem_wr(const uint64_t pa, const void *buf, const size_t sz)
 {
-    uint64_t pa_aligned;
-    uint8_t idx;
-    iodata_t v;
-
-    switch (sz) {
-    case 1:
-        pa_aligned = pa & ~0x3;
-        idx = pa & 0x3;
-        v.l = pal_reg_rd32(pa_aligned);
-        v.b[idx] = *(uint8_t *)buf;
-        pal_reg_wr32(pa_aligned, v.l);
-        break;
-    case 2:
-        pa_aligned = pa & ~0x3;
-        idx = (pa & 0x3) >> 1;
-        v.l = pal_reg_rd32(pa_aligned);
-        v.h[idx] = *(uint16_t *)buf;
-        pal_reg_wr32(pa_aligned, v.l);
-        break;
-    case 4:
-    case 8:
-        pal_reg_wr32w(pa, (uint32_t *)buf, sz >> 2);
-        break;
-    default:
-        break;
-    }
+    pal_mem_wr(pa, (uint32_t *)buf, sz, 0);
 }
 
 static inline int
@@ -153,6 +111,12 @@ pciesvc_debug_cmd(uint32_t *valp)
         pciesvc_logdebug("cfgrd delay %uus\n", delayus);
         pciesvc_usleep(delayus);
     }
+}
+
+static inline void
+pciesvc_get_timestamp(uint64_t *ts)
+{
+    *ts = (uint64_t) time(NULL);
 }
 
 #endif /* __PCIESVC_SYSTEM_LOCAL_H__ */
