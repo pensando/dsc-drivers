@@ -7,6 +7,7 @@
 #include "pcietlp.h"
 #include "req_int.h"
 #include "indirect.h"
+#include "intrutils.h"
 
 static u_int64_t
 ind_info_addr(const int port)
@@ -404,8 +405,24 @@ int
 pciehw_indirect_intr_init(const int port,
                           const u_int64_t msgaddr, const u_int32_t msgdata)
 {
-    return req_int_init(indirect_int_addr(), port,
-                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+    u_int64_t msgaddr0, msi_indirect_intr_base;
+    u_int32_t msgdata0;
+    int ret;
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+
+    msi_indirect_intr_base = PSHMEM_DATA_FIELD(pshmem, msi_intr_base);
+    if (msi_indirect_intr_base > 0) {
+        req_int_get(indirect_int_addr(), &msgaddr0, &msgdata0);
+
+        if (port == 0 || msgaddr0 == 0) {
+            req_int_set(indirect_int_addr(), intr_assert_addr(msi_indirect_intr_base), intr_assert_data());
+        }
+
+        ret = intr_config_local_msi(msi_indirect_intr_base + port, msgaddr, msgdata);
+    } else {
+        ret = req_int_init(indirect_int_addr(), port, msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+    }
+    return ret;
 }
 
 static int

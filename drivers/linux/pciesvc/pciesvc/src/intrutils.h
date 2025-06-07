@@ -38,17 +38,23 @@ typedef struct intr_msixcfg_s {
 } __attribute__((packed)) intr_msixcfg_t;
 
 /* override these to avoid static link dups */
+#define intr_assert_addr        _pciesvc_intr_assert_addr
+#define intr_assert_data        _pciesvc_intr_assert_data
 #define intr_assert             _pciesvc_intr_assert
 #define intr_deassert           _pciesvc_intr_deassert
 #define intr_drvcfg_mask        _pciesvc_intr_drvcfg_mask
 #define intr_fwcfg_mode         _pciesvc_intr_fwcfg_mode
 #define intr_reset_pci          _pciesvc_intr_reset_pci
 #define intr_pba_clear          _pciesvc_intr_pba_clear
+#define intr_config_local_msi   _pciesvc_intr_config_local_msi
 
+u_int64_t intr_assert_addr(const int intr);
+u_int32_t intr_assert_data(void);
 void intr_assert(const int intr);
 void intr_deassert(const int intr);
 int intr_drvcfg_mask(const int intr, const int on);
 void intr_fwcfg_mode(const int intr, const int legacy, const int fmask);
+int intr_config_local_msi(const int intr, u_int64_t msgaddr, u_int32_t msgdata);
 
 u_int32_t intr_pba_clear(const int intr);
 

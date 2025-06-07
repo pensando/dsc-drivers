@@ -49,13 +49,10 @@ intr_msixcfg(const int intr,
              const u_int64_t msgaddr, const u_int32_t msgdata, const int vctrl)
 {
     const u_int64_t pa = intr_msixcfg_addr(intr);
-#define MSG_ADDR_OFF    0
-#define MSG_DATA_OFF    8
-#define VECTOR_CTRL_OFF 12
 
-    pciesvc_reg_wr64(pa + MSG_ADDR_OFF, msgaddr);
-    pciesvc_reg_wr32(pa + MSG_DATA_OFF, msgdata);
-    pciesvc_reg_wr32(pa + VECTOR_CTRL_OFF, vctrl);
+    pciesvc_reg_wr64(pa + offsetof(intr_msixcfg_t, msgaddr), msgaddr);
+    pciesvc_reg_wr32(pa + offsetof(intr_msixcfg_t, msgdata), msgdata);
+    pciesvc_reg_wr32(pa + offsetof(intr_msixcfg_t, vector_ctrl), vctrl);
 }
 
 static void
@@ -65,14 +62,41 @@ intr_fwcfg_set_function_mask(const int intr, const int on)
     pciesvc_reg_wr32(pa, on);
 }
 
-static u_int64_t
+/*
+ * Set the function_mask for this interrupt resource.
+ * Return the previous value of the mask so caller can
+ * restore to previous value if desired.
+ */
+static int
+intr_fwcfg_function_mask(const int intr, const int on)
+{
+    const u_int64_t pa = intr_fwcfg_addr(intr);
+    const int omask = pciesvc_reg_rd32(pa); /* function_mask word[0] of fwcfg */
+    pciesvc_reg_wr32(pa, on);
+    return omask;
+}
+
+static void
+intr_drvcfg(const int intr,
+            const int mask, const int coal_init, const int mask_on_assert)
+{
+    u_int64_t pa = intr_drvcfg_addr(intr);
+
+    pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, mask), 1);
+    pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, coal_init), coal_init);
+    pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, mask_on_assert), mask_on_assert);
+    pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, coal_curr), 0);
+    pciesvc_reg_wr32(pa + offsetof(intr_drvcfg_t, mask), mask);
+}
+
+u_int64_t
 intr_assert_addr(const int intr)
 {
     pciesvc_assert(intr < INTR_COUNT);
     return INTR_ASSERT_BASE(intr) + (intr * INTR_ASSERT_STRIDE);
 }
 
-static u_int32_t
+u_int32_t
 intr_assert_data(void)
 {
     return INTR_ASSERT_DATA;
@@ -85,6 +109,31 @@ intr_assert(const int intr)
     const u_int32_t data = intr_assert_data();
 
     pciesvc_reg_wr32(pa, data);
+}
+
+/*
+ * Set an interrupt resource in "local" mode which makes the
+ * message address to be a local address, otherwise the
+ * message address is a host address.  Set to local for interrupts
+ * to be sent to the local CPU interrupt controller.
+ */
+static void
+intr_fwcfg_local(const int intr, const int on)
+{
+    const u_int64_t pa = intr_fwcfg_addr(intr);
+    intr_fwcfg_t v;
+    int omask;
+
+    /* mask via function_mask while making changes */
+    omask = intr_fwcfg_function_mask(intr, 1);
+    {
+        pciesvc_reg_rd32w(pa, v.w, NWORDS(v.w));
+        v.local_int = on;
+        pciesvc_reg_wr32w(pa, v.w, NWORDS(v.w));
+    }
+    if (!omask) {
+        intr_fwcfg_set_function_mask(intr, omask);
+    }
 }
 
 /*
@@ -112,6 +161,72 @@ intr_fwcfg_mode(const int intr, const int legacy, const int fmask)
     if (!fmask) {
         intr_fwcfg_set_function_mask(intr, fmask);
     }
+}
+
+/*
+ * Configure the fwcfg register group.  This register group is
+ * under fw control (hence the name) and not visible to the host.
+ *
+ * Note:  We are careful to make config changes to fwcfg only with
+ * the function_mask set.  Masking the interrupt will deassert the
+ * interrupt if asserted in legacy mode, then we change any config,
+ * then re-enable with the new config.  Subsequent interrupts
+ * will re-assert with the new config.
+ */
+static void
+intr_fwcfg(const int intr,
+           const int lif,
+           const int port,
+           const int legacy,
+           const int intpin,
+           const int fmask)
+{
+    const u_int64_t pa = intr_fwcfg_addr(intr);
+    intr_fwcfg_t v = {
+        .function_mask = 1, /* masked while making updates, then set */
+        .lif = lif,
+        .port_id = port,
+        .local_int = 0,
+        .legacy = legacy,
+        .int_pin = intpin,
+    };
+
+    /* mask via function_mask while making changes */
+    intr_fwcfg_set_function_mask(intr, 1);
+    {
+        pciesvc_reg_wr32w(pa, v.w, NWORDS(v.w));
+    }
+    if (!fmask) {
+        intr_fwcfg_set_function_mask(intr, fmask);
+    }
+}
+
+/*
+ * Short-cut for configuring an interrupt resource in MSI mode.
+ */
+static void
+intr_fwcfg_msi(const int intr, const int lif, const int port)
+{
+    const int legacy = 0;
+    const int intpin = 0;
+    const int fmask = 0;
+
+    intr_fwcfg(intr, lif, port, legacy, intpin, fmask);
+}
+
+int
+intr_config_local_msi(const int intr, u_int64_t msgaddr, u_int32_t msgdata)
+{
+    /* lif,port unused for local intrs */
+    intr_fwcfg_msi(intr, 0, 0);
+    /* allow local interrupt destination */
+    intr_fwcfg_local(intr, 1);
+    /* set msgaddr/data, unmask at msixcfg */
+    intr_msixcfg(intr, msgaddr, msgdata, 0);
+    /* default drvcfg settings, unmasked */
+    intr_drvcfg(intr, 0, 0, 0);
+
+    return 0;
 }
 
 /*****************************************************************

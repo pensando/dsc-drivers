@@ -7,6 +7,7 @@
 #include "pcietlp.h"
 #include "req_int.h"
 #include "notify.h"
+#include "intrutils.h"
 
 static u_int64_t
 notify_addr(const int port)
@@ -180,9 +181,26 @@ handle_notify(const int port, pciehw_port_t *p, notify_entry_t *nentry)
 int
 pciehw_notify_intr_init(const int port, u_int64_t msgaddr, u_int32_t msgdata)
 {
+    u_int64_t msgaddr0, msi_notify_intr_base;
+    u_int32_t msgdata0;
+    int ret;
+    pciehw_shmem_t *pshmem = pciesvc_shmem_get();
+
     notify_enable();
-    return req_int_init(notify_int_addr(), port,
-                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+    msi_notify_intr_base = PSHMEM_DATA_FIELD(pshmem, msi_intr_base);
+    if (msi_notify_intr_base > 0) {
+        msi_notify_intr_base += 8; // first 8 are indirect intrs
+        req_int_get(notify_int_addr(), &msgaddr0, &msgdata0);
+
+        if (port == 0 || msgaddr0 == 0) {
+            req_int_set(notify_int_addr(), intr_assert_addr(msi_notify_intr_base), intr_assert_data());
+        }
+
+        ret = intr_config_local_msi(msi_notify_intr_base + port, msgaddr, msgdata);
+    } else {
+        ret = req_int_init(notify_int_addr(), port, msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+    }
+    return ret;
 }
 
 static int
