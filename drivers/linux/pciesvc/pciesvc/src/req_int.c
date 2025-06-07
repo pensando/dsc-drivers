@@ -17,7 +17,7 @@ typedef union req_int_u {
     u_int32_t w[REQ_INT_NWORDS];
 } req_int_t;
 
-static void
+void
 req_int_set(const u_int64_t reg, const u_int64_t addr, const u_int32_t data)
 {
     req_int_t in = { .data = data, .addrdw = addr >> 2 };
@@ -25,7 +25,7 @@ req_int_set(const u_int64_t reg, const u_int64_t addr, const u_int32_t data)
     pciesvc_reg_wr32w(reg, in.w, REQ_INT_NWORDS);
 }
 
-static void
+void
 req_int_get(const u_int64_t reg, u_int64_t *addrp, u_int32_t *datap)
 {
     req_int_t in;

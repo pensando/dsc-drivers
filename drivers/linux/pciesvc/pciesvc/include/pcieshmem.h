@@ -221,6 +221,7 @@ typedef struct pciehw_shmem_lo_s {
     u_int32_t allocpmt_vf0adj;          /* low pri vf0 adjust (never freed) */
     u_int32_t freeprt_slab;             /* prt free slab adjacent */
     int8_t notify_port[PCIEHW_NPORTS];  /* which ports are allocated for notify */
+    u_int64_t msi_intr_base;
 } pciehw_shmem_lo_t;
 
 typedef struct pciehw_shmem_hi_s {
@@ -253,6 +254,7 @@ typedef struct pciehw_shmem_hi_s {
     u_int8_t vpddata[PCIEHW_NDEVS_HI][PCIEHW_VPDSZ];
     u_int8_t serial[PCIEHW_NPORTS][PCIEHW_SERIALSZ];
     int8_t notify_port[PCIEHW_NPORTS];  /* which ports are allocated for notify */
+    u_int64_t msi_intr_base;
 } pciehw_shmem_hi_t;
 
 typedef struct pciehw_shmem_s {

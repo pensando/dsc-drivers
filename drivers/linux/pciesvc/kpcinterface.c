@@ -104,31 +104,44 @@ void kpcimgr_undefined_entry(void)
  */
 void kpcimgr_init_intr(kstate_t *ks)
 {
+	volatile msi_info_t *msi;
 	pciesvc_params_t p;
-	volatile struct msi_info *msi;
+	int port, enabled_ports, intr_idx;
 
 	set_kstate(ks);
 	set_uart_regs((long)ks->uart_addr);	/* we are always called in virtual mode */
-	memset(&p, 0, sizeof(pciesvc_params_t));
 
-	p.version = 0;
-	p.params_v0.port = ks->active_port;
+	if (!ks->active_port_mask) {
+		enabled_ports = 1; // old kpcimgr does not have mask
+		msi = ks->msi_compat;
+	} else {
+		enabled_ports = ks->active_port_mask;
+		msi = ks->msi;
+	}
 
-	msi = &ks->msi[MSI_INDIRECT_IDX];
-	p.params_v0.ind_intr = 1;
-	p.params_v0.ind_msgaddr = msi->msgaddr;
-	p.params_v0.ind_msgdata = msi->msgdata;
+	for (port = 0; port < PCIE_NPORTS; port++) {
+		if (enabled_ports & (1 << port)) {
 
-	msi = &ks->msi[MSI_NOTIFY_IDX];
-	p.params_v0.not_intr = 1;
-	p.params_v0.not_msgaddr = msi->msgaddr;
-	p.params_v0.not_msgdata = msi->msgdata;
+			memset(&p, 0, sizeof(p));
+			p.version = 0;
+			p.params_v0.port = port;
 
-	if (pciesvc_init(&p))
-		kpr_err("%s: pciesvc_init failed\n", __func__);
+			intr_idx = port * 2;
+			p.params_v0.ind_intr = 1;
+			p.params_v0.ind_msgaddr = msi[intr_idx].msgaddr;
+			p.params_v0.ind_msgdata = msi[intr_idx].msgdata;
+			
+			intr_idx = port * 2 + 1;
+			p.params_v0.not_intr = 1;
+			p.params_v0.not_msgaddr = msi[intr_idx].msgaddr;
+			p.params_v0.not_msgdata = msi[intr_idx].msgdata;
 
-	/* clear out any pending transactions */
-	kpcimgr_poll(ks, 0, NORMAL);
+			if (pciesvc_init(&p))
+				kpr_err("%s: pciesvc_init failed for port %d\n", __func__, port);
+		}
+		/* clear out any pending transactions */
+		kpcimgr_poll(ks, 0, NORMAL);
+	}
 }
 
 /*
@@ -137,17 +150,30 @@ void kpcimgr_init_intr(kstate_t *ks)
 void kpcimgr_init_poll(kstate_t *ks)
 {
 	pciesvc_params_t p;
+	int port, enabled_ports;
 
 	set_kstate(ks);
-	memset(&p, 0, sizeof(pciesvc_params_t));
 
-	p.version = 0;
-	p.params_v0.port = ks->active_port;
+	if (!ks->active_port_mask) {
+		enabled_ports = 1; // old kpcimgr not passing mask
+	} else {
+		enabled_ports = ks->active_port_mask;
+	}
 
-	p.params_v0.ind_poll = 1;
-	p.params_v0.not_poll = 1;
+	for (port = 0; port < PCIE_NPORTS; port++) {
+		if (enabled_ports & (1 << port)) {
+			memset(&p, 0, sizeof(pciesvc_params_t));
 
-	pciesvc_init(&p);
+			p.version = 0;
+			p.params_v0.port = port;
+
+			p.params_v0.ind_poll = 1;
+			p.params_v0.not_poll = 1;
+
+			if (pciesvc_init(&p))
+				kpr_err("%s: pciesvc_init failed for port %d\n", __func__, port);
+		}
+	}
 }
 
 /*

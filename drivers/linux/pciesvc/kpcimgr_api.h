@@ -86,12 +86,17 @@ struct kpcimgr_entry_points_t {
 #define EARLY_POLL 9
 #define MAX_DATA 10
 
+typedef struct {
+	unsigned long msgaddr;
+	unsigned int msgdata;
+} msi_info_t;
+
 struct kpcimgr_state_t {
 	/* essential state */
 	int valid;
 	int debug;
 	int running;
-	int active_port;
+	int active_port_compat; /* old active_port field */
 	int have_persistent_mem;
 	int lib_version_major;
 	int lib_version_minor;
@@ -107,6 +112,8 @@ struct kpcimgr_state_t {
 			long uart_paddr;
 			int features;
 			int features_valid;
+			int active_port_mask;
+			msi_info_t msi[MSI_NVECTORS];
 		};
 	};
 
@@ -126,11 +133,8 @@ struct kpcimgr_state_t {
 	int nranges;
 	int hwmem_idx;
 
-	/* interrupt vectors */
-	struct msi_info {
-		unsigned long msgaddr;
-		unsigned int msgdata;
-	} msi[MSI_NVECTORS];
+	/* old single port interrupt vectors */
+	msi_info_t msi_compat[MSI_NVECTORS_COMPAT];
 
 	/* stats for work done */
 	int ind_cfgrd, ind_cfgwr;
