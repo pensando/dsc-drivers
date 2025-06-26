@@ -178,6 +178,7 @@ handle_notify(const int port, pciehw_port_t *p, notify_entry_t *nentry)
 /*
  * CFG_TGT_REQ_NOTIFY_INT
  */
+#if defined(ASIC_CAPRI) || defined(ASIC_ELBA)
 int
 pciehw_notify_intr_init(const int port, u_int64_t msgaddr, u_int32_t msgdata)
 {
@@ -202,6 +203,15 @@ pciehw_notify_intr_init(const int port, u_int64_t msgaddr, u_int32_t msgdata)
     }
     return ret;
 }
+#else
+int
+pciehw_notify_intr_init(const int port, u_int64_t msgaddr, u_int32_t msgdata)
+{
+    notify_enable();
+    return req_int_init(notify_int_addr(), port,
+                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+}
+#endif
 
 static int
 pciehw_notify_handle(const int port, const int polled)

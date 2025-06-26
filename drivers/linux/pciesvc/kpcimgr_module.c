@@ -32,7 +32,6 @@ MODULE_PARM_DESC(relocate, "specifies whether or not to relocate module");
 
 static int __init pciesvc_dev_init(void)
 {
-	struct kpcimgr_entry_points_t *kpci_get_entry_points(void);
 	struct kpcimgr_entry_points_t *ep;
 	int ret;
 

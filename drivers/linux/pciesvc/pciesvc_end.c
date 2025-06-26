@@ -19,6 +19,7 @@
  *
  * Author: rob.gardner@oracle.com
  */
-__attribute__((__noinline__)) void pciesvc_end(void)
+__attribute__((__noinline__)) void pciesvc_end(void);
+ __attribute__((__noinline__)) void pciesvc_end(void)
 {
 }

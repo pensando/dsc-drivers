@@ -18,22 +18,10 @@
 #include "kpcimgr_api.h"
 #include "pciesvc_impl.h"
 #include "version.h"
+#include "kpcinterface.h"
 
 extern char pciesvc_end;
-extern void kpcimgr_init_intr(void *);
-extern void kpcimgr_init_fn(void *);
-extern void kpcimgr_version_fn(char **);
-extern void kpcimgr_init_poll(kstate_t *);
 extern void pciesvc_shut(int);
-extern void kpcimgr_poll(kstate_t *, int, int);
-extern unsigned long kpcimgr_get_holding_pen(unsigned long, unsigned int);
-extern int kpcimgr_ind_intr(void *, int);
-extern int kpcimgr_not_intr(void *, int);
-extern void kpcimgr_undefined_entry(void);
-extern int pciesvc_sysfs_cmd_read(void *, char *, int *);
-extern int pciesvc_sysfs_cmd_write(void *, char *, size_t, int *);
-extern void kpcimgr_features(long *, long, long, long);
-extern void kpcimgr_reboot(long , long, long, long);
 
 extern int pciesvc_version_major;
 extern int pciesvc_version_minor;

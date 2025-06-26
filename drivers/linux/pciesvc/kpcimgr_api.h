@@ -56,6 +56,7 @@ struct kpcimgr_entry_points_t {
 #define FLAG_GUEST		BIT_ULL(2)
 #define FLAG_PSCI_CPU_RELEASED	BIT_ULL(3)
 #define FLAG_KEXEC		BIT_ULL(4)
+#define FLAG_PORT_BIFURCATION	BIT_ULL(5)
 #define FLAG_FUTURE_FEATURE	BIT_ULL(15)
 
 /* upcalls */
@@ -203,6 +204,7 @@ void kpcimgr_sysfs_setup(struct platform_device *pfdev);
 void *kpci_memcpy(void *dst, const void *src, size_t n);
 void wake_up_event_queue(void);
 int aarch64_insn_read(void *addr, u32 *insnp);
+struct kpcimgr_entry_points_t *kpci_get_entry_points(void);
 extern spinlock_t kpcimgr_lock;
 
 #define reset_stats(k) \

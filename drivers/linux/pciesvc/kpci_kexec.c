@@ -14,6 +14,7 @@
 #include "pciesvc.h"
 #include "pciesvc_system.h"
 #include "kpci_uart.h"
+#include "kpcinterface.h"
 
 #define TICKS_PER_US 200LL
 #define TICKS_PER_MS  (1000*TICKS_PER_US)
@@ -23,6 +24,10 @@ int holding_pen_idx;
 unsigned long kstate_paddr;
 kstate_t *kstate = NULL;
 long spin_table_start_addr;
+
+void released(void);
+void kpcimgr_cpu_polling_loop(kstate_t *ks);
+void serial_input(char c);
 
 void set_kstate(kstate_t *ks)
 {
@@ -35,7 +40,7 @@ int virtual(void)
 }
 
 /* called in physical mode */
-void kpcimgr_nommu_poll(kstate_t *ks)
+static void kpcimgr_nommu_poll(kstate_t *ks)
 {
 	kpcimgr_poll(ks, 0, NOMMU);
 	ks->trace_data[NOMMU][LAST_CALL_TIME] = read_sysreg(cntvct_el0);
@@ -79,7 +84,6 @@ void kpcimgr_cpu_polling_loop(kstate_t *ks)
 	unsigned long start = read_sysreg(cntvct_el0);
 #endif
 	extern void pciesvc_quit(void);
-	void serial_input(char c);
 	int i, npolls = 0;
 	char c;
 
@@ -117,7 +121,7 @@ void kpcimgr_cpu_polling_loop(kstate_t *ks)
 	}
 }
 
-void serial_help(void)
+static void serial_help(void)
 {
 	kpr_err("Commands:\n");
 	kpr_err(" a      Show addresses and parameters\n");
@@ -139,7 +143,7 @@ void serial_help(void)
 #define WDOG_CONTROL_REG_OFFSET             0x00
 #define WDOG_CONTROL_REG_WDT_EN_MASK        0x01
 #define WDOG_CONTROL_REG_RESP_MODE_MASK     0x02
-void watchdog_reboot(void)
+static void watchdog_reboot(void)
 {
         u32 val = readl(WDOG_REGS + WDOG_CONTROL_REG_OFFSET);
 
@@ -160,7 +164,7 @@ void watchdog_reboot(void)
  * if char c is a valid hex digit, then set *val to the
  * numerical value of that digit
  */
-int is_hexdigit(char c, int *val)
+static int is_hexdigit(char c, int *val)
 {
 	if (c >= '0' && c <= '9')
 		*val = c - '0';
@@ -185,7 +189,7 @@ int is_hexdigit(char c, int *val)
  * Return value of 1 indicates that we've processed the
  * character, otherwise the caller should process it.
  */
-int cfgval_process(char c)
+static int cfgval_process(char c)
 {
 	static int cfgval = 0, modify = 0;
 	static int state = NORMAL_INPUT;
@@ -326,7 +330,8 @@ void serial_input(char c)
  * serial thread is not used anymore, but leaving
  * it here as an example
  */
-void kpcimgr_serial_thread(kstate_t *ks)
+#if 0
+ void kpcimgr_serial_thread(kstate_t *ks)
 {
 	unsigned long start = read_sysreg(cntvct_el0);
 	int warning_printed = 0;
@@ -345,7 +350,7 @@ void kpcimgr_serial_thread(kstate_t *ks)
 	}
 	kpr_err("pciesvc: %s done\n", __func__);
 }
-
+#endif
 
 /*
  * Called from kpcimgr when the secondary CPUs are being taken

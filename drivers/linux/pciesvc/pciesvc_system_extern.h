@@ -250,4 +250,6 @@ void kpcimgr_report_stats(kstate_t *ks, int phase, int always, int rightnow);
 /* functions in kpci_kexec.c */
 void set_kstate(kstate_t *ks);
 
+void pciesvc_get_timestamp(uint64_t *ts);
+
 #endif /* __PCIESVC_SYSTEM_EXTERN_H__ */
