@@ -12,6 +12,7 @@
 #include "pciesvc_impl.h"
 #include "version.h"
 #include "kpci_uart.h"
+#include "kpcinterface.h"
 
 /*
  * This file contains only functions essential to the
@@ -31,9 +32,9 @@ void kpcimgr_version_fn(char **version)
 
 long using_psci, using_xen, protected_read;
 long uart_data_reg, uart_status_reg;
-long pciesvc_features = FLAG_PSCI | FLAG_GUEST;
+long pciesvc_features = FLAG_PSCI | FLAG_GUEST | FLAG_PORT_BIFURCATION;
 
-void set_uart_regs(long uart_addr)
+static void set_uart_regs(long uart_addr)
 {
 	kstate_t *ks = get_kstate();
 
@@ -56,12 +57,12 @@ void kpcimgr_features(long *features, long dummy1, long dummy2, long dummy3)
 	kstate_t *ks = get_kstate();
 	extern long kstate_paddr;
 
+	if (features)
+		*features = pciesvc_features;
+
 	/* if we are called from an old kernel, do nothing */
 	if (ks->features_valid != KSTATE_MAGIC)
 		return;
-
-	if (features)
-		*features = pciesvc_features;
 /*
  * Setting kstate_paddr here works because we are always called *before* kpcimgr
  * copies the pciesvc code/data out to persistent memory. This is better than the
@@ -86,7 +87,13 @@ void kpcimgr_features(long *features, long dummy1, long dummy2, long dummy3)
 void kpcimgr_reboot(long dummy0, long dummy1, long dummy2, long dummy3)
 {
 	kstate_t *ks = get_kstate();
+	extern long kstate_paddr;
 
+	kstate_paddr = ks->kstate_paddr;
+	if (ks->features & FLAG_PSCI)
+		using_psci = 1;
+	if (ks->features & FLAG_GUEST)
+		using_xen = ~0LL;
 	set_uart_regs(ks->uart_paddr);	/* set to physical address */
 	kpr_err("%s: pciesvc ack kexec\n", __func__);
 }
@@ -280,7 +287,7 @@ int kpcimgr_not_intr(kstate_t *ks, int port)
  * physical address.
  *
  */
-void *kpcimgr_va_get(unsigned long pa, unsigned long sz)
+static void *kpcimgr_va_get(unsigned long pa, unsigned long sz)
 {
 	kstate_t *ks = get_kstate();
 	int i;
@@ -552,7 +559,7 @@ pciesvc_log(const char *msg)
 		kdbg_puts((char *)msg);
 }
 
-void wakeup_event_queue(void)
+static void wakeup_event_queue(void)
 {
 	kstate_t *ks = get_kstate();
 	u64 (*upcall)(int req);

@@ -401,6 +401,7 @@ pciehw_indirect_global_init(const int active_port)
     return 0;
 }
 
+#if defined(ASIC_CAPRI) || defined(ASIC_ELBA)
 int
 pciehw_indirect_intr_init(const int port,
                           const u_int64_t msgaddr, const u_int32_t msgdata)
@@ -424,6 +425,15 @@ pciehw_indirect_intr_init(const int port,
     }
     return ret;
 }
+#else
+int
+pciehw_indirect_intr_init(const int port,
+                          const u_int64_t msgaddr, const u_int32_t msgdata)
+{
+    return req_int_init(indirect_int_addr(), port,
+                        msgaddr, MADDR_AS_IS, msgdata, MDATA_ADD_PORT);
+}
+#endif
 
 static int
 pciehw_indirect_handle(const int port, const int polled)
