@@ -1449,6 +1449,7 @@ unsigned int ionic_tx_cq_service(struct ionic_cq *cq,
 		if (unlikely(netif_tx_queue_stopped(nd_txq)) &&
 		    ionic_q_has_space(q, IONIC_TSO_DESCS_NEEDED)) {
 			netif_tx_wake_queue(nd_txq);
+			trace_ionic_q_start(q);
 			q->wake++;
 		}
 	}
