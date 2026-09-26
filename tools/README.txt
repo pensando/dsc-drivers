@@ -242,3 +242,66 @@ and keep the loop under about 30 s (below rcu_cpu_stall_timeout,
      950000 is the usual default; restore whatever sched_rt_runtime_us
      held before step 4. The NAPI threads remain until the next module
      reload and are idle once threaded is 0.
+
+
+ionic-qstop-stack.sh
+--------------------
+
+Records a kernel stack trace each time the driver stops a Tx subqueue.
+Enables the ionic:ionic_q_stop tracepoint for one netdev with a
+stacktrace trigger, in a private trace instance that is removed on exit.
+
+Usage
+
+  ./ionic-qstop-stack.sh -i <ifname> [-d SECS] [-o FILE]
+
+  -i IFNAME   netdev to trace (required)
+  -d SECS     stop after this many seconds (default: until Ctrl-C)
+  -o FILE     also write the captured trace to FILE
+
+Reading the stack
+
+  The top frames name the stop path:
+
+  ionic_maybe_stop_tx <- ionic_start_xmit
+      The queue was stopped before posting, because the next skb needs
+      more descriptors than are free. A TSO skb whose gso_segs exceeds
+      the ring size lands here and can never fit: the queue stays
+      stopped and the watchdog fires. This is the IBM tx-timeout shape.
+
+  ionic_check_stop_tx <- ionic_tx
+      The ring filled during normal posting; a completion will wake it.
+
+  ionic_tx_tso never appears: the stop is decided before it is called,
+  and ionic_tx_tso has no stop of its own.
+
+  Example (a stop from an oversized TSO skb injected for test):
+
+    ionic_q_stop: <ifname>: queue[0]
+     => ionic_maybe_stop_tx
+     => ionic_start_xmit
+     => dev_hard_start_xmit
+     => sch_direct_xmit
+     => __dev_queue_xmit
+     ...
+
+Getting the descriptor count
+
+  The stack does not carry how many descriptors the stopping skb needed.
+  Both stop paths above look identical in the stack, so to tell an
+  oversized-TSO stop from an ordinary full ring, capture the count too:
+
+    # segment count of every large GSO skb handed to the netdev
+    cd /sys/kernel/debug/tracing
+    echo 'name == "<ifname>" && gso_segs > 1000' \
+        > events/net/net_dev_start_xmit/filter
+    echo 1 > events/net/net_dev_start_xmit/enable
+    cat trace_pipe        # prints gso_size, gso_segs, len, queue_mapping
+
+    # or the ndescs argument at the exact stop (dsc 24.07: 3-arg, %dx)
+    echo 'p:mstop ionic_maybe_stop_tx ndescs=%dx:s32' > kprobe_events
+    echo 'ndescs > 1000' > events/kprobes/mstop/filter
+    echo 1 > events/kprobes/mstop/enable
+
+  A gso_segs or ndescs above the Tx ring size (num_descs - 1, e.g. 1023
+  for a 1024-entry ring) is a packet that can never fit.
