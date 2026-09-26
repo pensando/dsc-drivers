@@ -2353,14 +2353,14 @@ static int ionic_start_queues(struct ionic_lif *lif)
 	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return -EBUSY;
 
-	if (test_and_set_bit(IONIC_LIF_F_UP, lif->state))
+	if (test_bit(IONIC_LIF_F_UP, lif->state))
 		return 0;
 
 	err = ionic_txrx_enable(lif);
-	if (err) {
-		clear_bit(IONIC_LIF_F_UP, lif->state);
+	if (err)
 		return err;
-	}
+
+	set_bit(IONIC_LIF_F_UP, lif->state);
 	netif_tx_wake_all_queues(lif->netdev);
 
 	return 0;
