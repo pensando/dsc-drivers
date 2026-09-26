@@ -37,6 +37,7 @@ extern bool port_init_up;
 extern unsigned short rx_copybreak;
 extern unsigned int rx_fill_threshold;
 extern unsigned int tx_budget;
+extern bool tx_timeout_recover;
 extern unsigned int devcmd_timeout;
 extern unsigned long affinity_mask_override;
 

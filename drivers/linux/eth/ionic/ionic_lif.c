@@ -1950,6 +1950,10 @@ static void ionic_tx_timeout(struct net_device *netdev)
 #endif
 
 	netdev_info(lif->netdev, "Tx Timeout triggered - txq %d\n", txqueue);
+	if (!READ_ONCE(tx_timeout_recover)) {
+		netdev_info(lif->netdev, "Tx Timeout recovery disabled, queues left as-is\n");
+		return;
+	}
 	schedule_work(&lif->tx_timeout_work);
 }
 
@@ -2353,14 +2357,14 @@ static int ionic_start_queues(struct ionic_lif *lif)
 	if (test_bit(IONIC_LIF_F_FW_RESET, lif->state))
 		return -EBUSY;
 
-	if (test_and_set_bit(IONIC_LIF_F_UP, lif->state))
+	if (test_bit(IONIC_LIF_F_UP, lif->state))
 		return 0;
 
 	err = ionic_txrx_enable(lif);
-	if (err) {
-		clear_bit(IONIC_LIF_F_UP, lif->state);
+	if (err)
 		return err;
-	}
+
+	set_bit(IONIC_LIF_F_UP, lif->state);
 	netif_tx_wake_all_queues(lif->netdev);
 
 	return 0;
