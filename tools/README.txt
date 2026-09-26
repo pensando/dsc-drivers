@@ -135,3 +135,110 @@ Caveats
     Correlate with dmesg -T or the trigger line's timestamp.
   - The script takes one snapshot per run, with no history before the
     timeout.
+
+
+Reproducing a Tx timeout
+------------------------
+
+For testing the script and tx_timeout_recover without waiting for a
+field failure. The method starves the NAPI thread of one or more Tx
+queues on an idle CPU. The device keeps posting completions that nothing
+processes, the ring fills, the queue stops, and the watchdog fires after
+about 5 s. Stalling two queues also shows the script finding a stuck
+queue the kernel never reports.
+
+This disrupts traffic on the chosen queues and runs a SCHED_FIFO busy
+loop on one CPU with RT throttling off. Use a test host, an idle CPU,
+and keep the loop under about 30 s (below rcu_cpu_stall_timeout,
+/sys/module/rcupdate/parameters/rcu_cpu_stall_timeout).
+
+  1. Setup:
+
+     IF=<ifname>
+     PG=/proc/net/pktgen
+     modprobe pktgen
+     echo 1 > /sys/class/net/$IF/threaded
+     echo rem_device_all > $PG/kpktgend_10
+     echo "add_device $IF" > $PG/kpktgend_10
+     for kv in "pkt_size 64" "dst_mac 02:00:00:00:00:01" \
+               "dst 198.51.100.1" "count 2000" "ratep 20000"; do
+         echo "$kv" > $PG/$IF
+     done
+
+  2. Find the NAPI thread of each target queue (5 and 40 here). Send
+     2000 packets on the queue; its thread is the one that woke about
+     2000 times:
+
+     snap() {
+         for p in $(pgrep -f "napi/$IF"); do
+             echo "$p $(awk '/^voluntary_ctxt/ {print $2}' \
+                 /proc/$p/status)"
+         done | sort
+     }
+     for q in 5 40; do
+         echo "queue_map_min $q" > $PG/$IF
+         echo "queue_map_max $q" > $PG/$IF
+         snap > /tmp/b; echo start > $PG/pgctrl; snap > /tmp/a
+         join /tmp/b /tmp/a |
+             awk -v q=$q '$3-$2 >= 1900 && $3-$2 <= 2100 {
+                 print "q" q ": " $1 }'
+     done
+     echo rem_device_all > $PG/kpktgend_10
+
+  3. Disable recovery and arm the script:
+
+     echo N > /sys/module/ionic/parameters/tx_timeout_recover
+     ./ionic-tx-timeout-snapshot.sh -i $IF -d /var/tmp &
+
+  4. Pin the NAPI threads to an idle CPU at SCHED_IDLE, start the busy
+     loop on that CPU, and drive traffic into both queues:
+
+     CPU=<idle cpu>
+     for pid in <q5 pid> <q40 pid>; do
+         taskset -pc $CPU $pid
+         chrt -i -p 0 $pid
+     done
+     echo -1 > /proc/sys/kernel/sched_rt_runtime_us
+     timeout 25 chrt -f 99 taskset -c $CPU \
+         bash -c 'while :; do :; done' &
+     for q in 5 40; do
+         echo "add_device $IF@$q" > $PG/kpktgend_10
+         for kv in "pkt_size 64" "dst_mac 02:00:00:00:00:01" \
+                   "dst 198.51.100.1" "count 20000" "ratep 5000" \
+                   "queue_map_min $q" "queue_map_max $q"; do
+             echo "$kv" > "$PG/$IF@$q"
+         done
+     done
+     echo start > $PG/pgctrl &
+
+  5. Expected:
+
+     - dmesg shows "NETDEV WATCHDOG ... transmit queue 5" followed by
+       "Tx Timeout recovery disabled, queues left as-is", about every
+       5 s. Only queue 5 is ever named.
+     - The script prints "reported queue: 5" and lists both q5 and q40
+       as stuck, with pend=Y and icred equal to infl. q40 has tmo=0.
+     - raw/L0-tx5/ and raw/L0-tx40/ hold the rings (num_descs *
+       desc_size bytes each, 16384 for a 1024-entry ring).
+     - While the busy loop runs, q/head and q/tail of the stuck queues
+       stay the same across watchdog firings: nothing rebuilt them.
+
+  6. Resume and verify recovery:
+
+     echo Y > /sys/module/ionic/parameters/tx_timeout_recover
+
+     The next firing logs "Tx Timeout triggered" without the "recovery
+     disabled" line. Once the busy loop ends, NAPI runs, the queues are
+     rebuilt, and q/head and q/tail reset to 0.
+
+  7. Clean up:
+
+     echo 950000 > /proc/sys/kernel/sched_rt_runtime_us
+     echo stop > $PG/pgctrl
+     echo rem_device_all > $PG/kpktgend_10
+     rmmod pktgen
+     echo 0 > /sys/class/net/$IF/threaded
+
+     950000 is the usual default; restore whatever sched_rt_runtime_us
+     held before step 4. The NAPI threads remain until the next module
+     reload and are idle once threaded is 0.
