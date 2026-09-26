@@ -35,6 +35,10 @@ unsigned int tx_budget = IONIC_TX_BUDGET_DEFAULT;
 module_param(tx_budget, uint, 0600);
 MODULE_PARM_DESC(tx_budget, "Number of tx completions to process per NAPI poll");
 
+bool tx_timeout_recover = true;
+module_param(tx_timeout_recover, bool, 0600);
+MODULE_PARM_DESC(tx_timeout_recover, "Reset the queues on a Tx timeout; N leaves them as-is for debugging (default Y)");
+
 unsigned int devcmd_timeout = DEVCMD_TOUT_DEF;
 module_param(devcmd_timeout, uint, 0600);
 MODULE_PARM_DESC(devcmd_timeout, "Devcmd timeout in seconds (default 30 secs)");

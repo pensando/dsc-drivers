@@ -1950,6 +1950,10 @@ static void ionic_tx_timeout(struct net_device *netdev)
 #endif
 
 	netdev_info(lif->netdev, "Tx Timeout triggered - txq %d\n", txqueue);
+	if (!READ_ONCE(tx_timeout_recover)) {
+		netdev_info(lif->netdev, "Tx Timeout recovery disabled, queues left as-is\n");
+		return;
+	}
 	schedule_work(&lif->tx_timeout_work);
 }
 
