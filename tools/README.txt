@@ -305,3 +305,41 @@ Getting the descriptor count
 
   A gso_segs or ndescs above the Tx ring size (num_descs - 1, e.g. 1023
   for a 1024-entry ring) is a packet that can never fit.
+
+
+ionic-qstop-ndescs.sh
+---------------------
+
+Prints the descriptor count each time the driver stops a Tx queue for
+lack of ring space, via a kprobe on ionic_maybe_stop_tx. The ndescs
+argument is the count the stopping skb needs (gso_segs for a TSO skb);
+a value above the ring size (num_descs - 1) can never fit.
+
+Usage
+
+  ./ionic-qstop-ndescs.sh [-t N] [-r REG] [-d SECS] [-o FILE]
+
+  -t N        show only stops needing more than N descriptors (default 1000)
+  -r REG      register holding the ndescs argument:
+                %dx  dsc 24.07 driver (3-arg), default
+                %si  in-tree driver (2-arg)
+  -d SECS     stop after this many seconds (default: until Ctrl-C)
+  -o FILE     also write the captured trace to FILE
+
+Example hit:
+
+  mstop_1234: (ionic_maybe_stop_tx+0x0/0x110 [ionic]) ndescs=1500
+
+Notes
+
+  - The kprobe fires for every Tx queue on every ionic netdev, so -t is
+    what keeps the normal small requests out. ndescs does not carry the
+    netdev or queue; correlate with ionic-qstop-stack.sh or with
+    net:net_dev_start_xmit (queue_mapping, gso_segs).
+  - The register depends on the driver's ionic_maybe_stop_tx signature:
+    3-arg (netdev, q, ndescs) -> %dx; 2-arg (q, ndescs) -> %si. If every
+    hit is implausible (huge or negative), switch -r. With BTF/DWARF in
+    ionic.ko, "perf probe -m ionic 'ionic_maybe_stop_tx ndescs'" resolves
+    the arg by name and avoids the register question.
+  - Runs in a private trace instance and removes both it and the kprobe
+    on exit.
