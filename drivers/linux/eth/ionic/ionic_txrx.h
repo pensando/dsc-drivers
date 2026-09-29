@@ -13,6 +13,11 @@ int ionic_rx_napi(struct napi_struct *napi, int budget);
 int ionic_tx_napi(struct napi_struct *napi, int budget);
 int ionic_txrx_napi(struct napi_struct *napi, int budget);
 netdev_tx_t ionic_start_xmit(struct sk_buff *skb, struct net_device *netdev);
+#ifdef HAVE_NDO_FEATURES_CHECK
+netdev_features_t ionic_features_check(struct sk_buff *skb,
+				       struct net_device *netdev,
+				       netdev_features_t features);
+#endif
 
 bool ionic_rx_service(struct ionic_cq *cq);
 #ifdef HAVE_NET_XDP

@@ -2956,6 +2956,9 @@ static const struct net_device_ops ionic_netdev_ops = {
 	.ndo_stop               = ionic_stop,
 	.ndo_eth_ioctl		= ionic_eth_ioctl,
 	.ndo_start_xmit		= ionic_start_xmit,
+#ifdef HAVE_NDO_FEATURES_CHECK
+	.ndo_features_check	= ionic_features_check,
+#endif
 #ifdef HAVE_NET_XDP
 	.ndo_bpf		= ionic_xdp,
 	.ndo_xdp_xmit		= ionic_xdp_xmit,
@@ -3009,6 +3012,9 @@ static const struct net_device_ops ionic_mnic_netdev_ops = {
 	.ndo_stop               = ionic_stop,
 	.ndo_eth_ioctl		= ionic_eth_ioctl,
 	.ndo_start_xmit		= ionic_start_xmit,
+#ifdef HAVE_NDO_FEATURES_CHECK
+	.ndo_features_check	= ionic_features_check,
+#endif
 #ifdef HAVE_NET_XDP
 	.ndo_bpf		= ionic_xdp,
 	.ndo_xdp_xmit		= ionic_xdp_xmit,
