@@ -2025,6 +2025,36 @@ err_out_drop:
 }
 #endif
 
+#ifdef HAVE_NDO_FEATURES_CHECK
+netdev_features_t ionic_features_check(struct sk_buff *skb,
+				       struct net_device *netdev,
+				       netdev_features_t features)
+{
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+
+	if (skb_is_gso(skb)) {
+#ifndef HAVE_NETIF_SET_TSO_MAX_SEGS
+		struct ionic_lif *lif = netdev_priv(netdev);
+#endif
+		unsigned int limit = READ_ONCE(netdev->gso_max_segs);
+		unsigned int segs = shinfo->gso_segs;
+
+		/* gso_segs can still be 0 here for an SKB_GSO_DODGY skb,
+		 * and the core's gso_max_segs check misses it then.
+		 */
+		if (!segs)
+			segs = DIV_ROUND_UP(skb->len, shinfo->gso_size);
+#ifndef HAVE_NETIF_SET_TSO_MAX_SEGS
+		limit = min(limit, READ_ONCE(lif->ntxq_descs) - 1);
+#endif
+		if (segs > limit)
+			features &= ~NETIF_F_GSO_MASK;
+	}
+
+	return vlan_features_check(skb, features);
+}
+#endif
+
 netdev_tx_t ionic_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	u16 queue_index = skb_get_queue_mapping(skb);
