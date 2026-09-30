@@ -6878,6 +6878,19 @@ static inline struct devlink *_kc_devlink_alloc(const struct devlink_ops *ops,
 #endif /* 5.18 */
 
 /*****************************************************************************/
+#if (KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
+static inline void _kc_netif_set_tso_max_segs(struct net_device *dev,
+					      unsigned int segs)
+{
+	if (segs < READ_ONCE(dev->gso_max_segs))
+		WRITE_ONCE(dev->gso_max_segs, segs);
+}
+#define netif_set_tso_max_segs _kc_netif_set_tso_max_segs
+#else
+#define HAVE_NETIF_SET_TSO_MAX_SEGS
+#endif /* 5.19 */
+
+/*****************************************************************************/
 #if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE && \
 	(!RHEL_RELEASE_CODE || \
 	  RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8, 8) || \

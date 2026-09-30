@@ -357,11 +357,21 @@ static inline void ionic_init_queue_params(struct ionic_lif *lif,
 	qparam->cmb_rx = test_bit(IONIC_LIF_F_CMB_RX_RINGS, lif->state);
 }
 
+static inline void ionic_lif_set_ntxq_descs(struct ionic_lif *lif,
+					    unsigned int descs)
+{
+	if (descs == lif->ntxq_descs)
+		return;
+
+	WRITE_ONCE(lif->ntxq_descs, descs);
+	netif_set_tso_max_segs(lif->netdev, descs - 1);
+}
+
 static inline void ionic_set_queue_params(struct ionic_lif *lif,
 					  struct ionic_queue_params *qparam)
 {
 	lif->nxqs = qparam->nxqs;
-	lif->ntxq_descs = qparam->ntxq_descs;
+	ionic_lif_set_ntxq_descs(lif, qparam->ntxq_descs);
 	lif->nrxq_descs = qparam->nrxq_descs;
 	lif->rxq_features = qparam->rxq_features;
 
