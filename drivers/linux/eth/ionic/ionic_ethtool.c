@@ -806,16 +806,16 @@ static int ionic_set_ringparam(struct net_device *netdev,
 	}
 
 	if (ring->tx_pending > IONIC_MAX_TX_DESC ||
-	    ring->tx_pending < IONIC_MIN_TXRX_DESC) {
+	    ring->tx_pending < IONIC_MIN_TX_DESC) {
 		netdev_info(netdev, "Tx descriptor count must be in the range [%d-%d]\n",
-			    IONIC_MIN_TXRX_DESC, IONIC_MAX_TX_DESC);
+			    IONIC_MIN_TX_DESC, IONIC_MAX_TX_DESC);
 		return -EINVAL;
 	}
 
 	if (ring->rx_pending > IONIC_MAX_RX_DESC ||
-	    ring->rx_pending < IONIC_MIN_TXRX_DESC) {
+	    ring->rx_pending < IONIC_MIN_RX_DESC) {
 		netdev_info(netdev, "Rx descriptor count must be in the range [%d-%d]\n",
-			    IONIC_MIN_TXRX_DESC, IONIC_MAX_RX_DESC);
+			    IONIC_MIN_RX_DESC, IONIC_MAX_RX_DESC);
 		return -EINVAL;
 	}
 
